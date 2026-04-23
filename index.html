@@ -1,0 +1,2478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Saturday Hobby Auto | EXECUTIVE OS v102</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp }              from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js';
+        import { getFirestore, doc, setDoc, onSnapshot, deleteDoc } from 'https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js';
+
+        const firebaseConfig = {
+            apiKey:            "AIzaSyDN1AGcDaC2CQIAabPLGS6GVahJZAYsGXo",
+            authDomain:        "mins-database-pro.firebaseapp.com",
+            projectId:         "mins-database-pro",
+            storageBucket:     "mins-database-pro.firebasestorage.app",
+            messagingSenderId: "247640519884",
+            appId:             "1:247640519884:web:c2e646de6ab41bc1d2be69"
+        };
+
+        const fbApp  = initializeApp(firebaseConfig);
+        const fsDb   = getFirestore(fbApp);
+        const DOCREF = doc(fsDb, 'sha_workshop', 'main');
+
+        // Unique session ID — ignores own echoes from Firestore
+        const SESSION = Math.random().toString(36).slice(2, 10);
+        let _suppressListener = false;
+
+        // ── Push db to Firestore ──────────────────────────────────────────────
+        window.__fsPush = async function(dbObj) {
+            _suppressListener = true;
+            try {
+                await setDoc(DOCREF, { data: JSON.stringify(dbObj), session: SESSION, ts: Date.now() });
+            } catch(e) {
+                console.warn('Firestore write failed:', e.message);
+                showSyncStatus('offline');
+            }
+            // Suppress for 2 s to avoid our own echo triggering a re-render
+            setTimeout(() => { _suppressListener = false; }, 2000);
+        };
+
+        // ── Wipe Firestore doc ────────────────────────────────────────────────
+        window.__fsDelete = async function() {
+            try { await deleteDoc(DOCREF); } catch(e) {}
+        };
+
+        // ── Real-time listener ────────────────────────────────────────────────
+        let _firstLoad = true;
+        onSnapshot(DOCREF, (snap) => {
+            showSyncStatus('online');
+            if (!snap.exists()) return;
+            const remote = snap.data();
+            if (!remote || !remote.data) return;
+
+            // Ignore our own write echoes
+            if (remote.session === SESSION) return;
+            // Suppress if we explicitly asked to
+            if (_suppressListener) return;
+
+            try {
+                const remoteDb = JSON.parse(remote.data);
+                // Merge into window.db safely
+                if (window.db) {
+                    Object.assign(window.db, remoteDb);
+                    // Also keep localStorage in sync
+                    localStorage.setItem('sha_v102_db', remote.data);
+                    showSyncStatus('synced');
+                    // Re-render current view
+                    if (typeof renderData === 'function') renderData();
+                    if (!_firstLoad) showCloudToast();
+                }
+                _firstLoad = false;
+            } catch(e) {
+                console.warn('Cloud sync parse error:', e.message);
+            }
+        }, (err) => {
+            console.warn('Firestore listener error:', err.message);
+            showSyncStatus('offline');
+        });
+
+        function showCloudToast() {
+            let t = document.getElementById('_cloudToast');
+            if (!t) {
+                t = document.createElement('div');
+                t.id = '_cloudToast';
+                t.style.cssText = 'position:fixed;bottom:24px;right:24px;background:linear-gradient(135deg,#10b981,#059669);color:white;padding:10px 20px;border-radius:20px;font-size:0.78rem;font-weight:700;z-index:999998;box-shadow:0 4px 20px rgba(0,0,0,0.4);pointer-events:none;transition:opacity 0.4s;';
+                document.body.appendChild(t);
+            }
+            t.textContent = '☁️ Data updated from another device';
+            t.style.opacity = '1';
+            clearTimeout(t._hide);
+            t._hide = setTimeout(() => { t.style.opacity = '0'; }, 4000);
+        }
+
+        function showSyncStatus(state) {
+            let el = document.getElementById('_syncBadge');
+            if (!el) return;
+            if (state === 'online')  { el.textContent = '☁️ Online';  el.style.color = '#6ee7b7'; }
+            if (state === 'synced')  { el.textContent = '✅ Synced';  el.style.color = '#86efac'; }
+            if (state === 'saving')  { el.textContent = '💾 Saving…'; el.style.color = '#fde68a'; }
+            if (state === 'offline') { el.textContent = '⚠️ Offline'; el.style.color = '#fca5a5'; }
+        }
+
+        window.showSyncStatus = showSyncStatus;
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #070a13; color: #f8fafc; margin: 0; padding: 0; overflow: hidden; }
+
+        #lock-screen { position: fixed; inset: 0; background-color: #070a13; background-image: linear-gradient(rgba(7, 10, 19, 0.90), rgba(7, 10, 19, 0.98)), url('lock_bg.jpg'); background-size: cover; background-position: center; background-repeat: no-repeat; z-index: 999999; display: flex; align-items: center; justify-content: center; flex-direction: column; }
+        .pin-input { background: #0f172a; border: 2px solid #1e293b; border-radius: 24px; padding: 20px; text-align: center; font-size: 32px; font-weight: 900; letter-spacing: 12px; color: #ef4444; width: 220px; outline: none; transition: 0.3s; }
+        .pin-input:focus { border-color: #ef4444; box-shadow: 0 0 20px rgba(239,68,68,0.2); }
+
+        .view-content { display: none; }
+        .view-content.active { display: block; }
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.96); z-index: 10000; align-items: center; justify-content: center; padding: 20px; }
+        .modal.active { display: flex; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+        tr.clickable-row { cursor: pointer; transition: 0.2s; border-bottom: 1px solid #1e293b; }
+        tr.clickable-row:hover { background-color: rgba(30,41,59,0.8) !important; }
+        .stat-card-click { cursor: pointer; transition: all 0.2s ease; overflow: hidden; border: 1px solid #1e293b; border-radius: 35px; background: #0f172a; padding: 25px; }
+        .stat-card-click:hover { border-color: #ef4444; transform: translateY(-2px); }
+        .chart-container { background: #0f172a; border: 1px solid #1e293b; border-radius: 40px; padding: 25px; min-height: 480px; }
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+        .cal-day { background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 6px 8px; min-height: 52px; cursor: pointer; transition: 0.2s; }
+        .cal-day:hover { border-color: #ef4444; }
+        .cal-badge { background: #ef4444; color: white; font-size: 8px; font-weight: 900; padding: 2px 6px; border-radius: 10px; display: inline-block; margin-top: 5px; }
+        .photo-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 12px; border: 2px solid #1e293b; }
+
+        /* Status pill buttons */
+        .status-pill { padding: 8px 18px; border-radius: 999px; font-size: 0.7rem; font-weight: 900; cursor: pointer; border: 2px solid transparent; transition: all 0.2s; text-transform: uppercase; letter-spacing: .05em; }
+        .status-pill.unstarted-active  { background: #7f1d1d; border-color: #ef4444; color: #fca5a5; }
+        .status-pill.progress-active   { background: #7c2d12; border-color: #f97316; color: #fdba74; }
+        .status-pill.completed-active  { background: #14532d; border-color: #22c55e; color: #86efac; }
+        .status-pill.cancelled-active  { background: #450a0a; border-color: #f87171; color: #fecaca; }
+        .status-pill.inactive          { background: #0f172a; border-color: #1e293b; color: #475569; }
+        .status-pill:hover             { opacity: 0.85; }
+
+        /* Parts table */
+        .parts-input { background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 8px 10px; color: white; font-weight: 700; outline: none; width: 100%; font-size: 0.75rem; }
+        .parts-input:focus { border-color: #3b82f6; }
+        .parts-input.readonly { background: #0a0f1e; color: #64748b; cursor: default; }
+
+        @media print {
+            body, html { overflow: visible !important; height: auto !important; background: white !important; }
+            body * { visibility: hidden; }
+            .modal { position: absolute !important; z-index: auto !important; bottom: auto !important; background: none !important; }
+            #invoiceModal { overflow: visible !important; }
+            #invoiceModal > div { border: none !important; border-radius: 0 !important; max-height: none !important; box-shadow: none !important; overflow: visible !important; }
+            #printable-invoice, #printable-invoice * { visibility: visible; color: black !important; }
+            #printable-invoice { position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 0; box-shadow: none !important; background: white !important;}
+        }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden">
+
+<!-- ── LOCK SCREEN ──────────────────────────────────────────────────────── -->
+<div id="lock-screen">
+    <div class="text-center space-y-10">
+        <div class="mb-6">
+            <h1 class="text-5xl font-black text-red-600 italic uppercase tracking-tighter">Saturday Hobby Auto</h1>
+            <p class="text-[10px] text-slate-500 font-bold uppercase tracking-[0.4em] mt-4 italic">Executive OS Locked</p>
+        </div>
+        <div class="space-y-4">
+            <input type="password" id="pin-field" maxlength="4" placeholder="••••" class="pin-input" autocomplete="off"
+                onkeyup="if(event.key==='Enter'||this.value.length===4) checkPin()"
+                oninput="if(this.value.length===4) checkPin()">
+            <button onclick="checkPin()" class="w-full bg-red-600 py-4 rounded-2xl font-black uppercase tracking-widest text-white shadow-2xl hover:bg-red-700">Unlock Master</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── SIDEBAR OVERLAY (MOBILE) ────────────────────────────────────────── -->
+<div id="sidebar-overlay" class="fixed inset-0 bg-black/80 z-[99999] hidden md:hidden" onclick="toggleSidebar()"></div>
+
+<!-- ── SIDEBAR ──────────────────────────────────────────────────────────── -->
+<aside id="sidebar" class="w-72 bg-slate-900 border-r border-slate-800 flex flex-col shrink-0 fixed inset-y-0 left-0 z-[100000] transform -translate-x-full md:relative md:translate-x-0 transition duration-200 ease-in-out">
+    <div class="p-8 text-center relative">
+        <h1 class="text-2xl font-black text-red-600 italic uppercase tracking-tighter leading-none">Saturday Hobby Auto</h1>
+        <p class="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-2 italic">Executive OS v102</p>
+        <button onclick="toggleSidebar()" class="absolute top-4 right-4 text-slate-500 hover:text-white md:hidden text-2xl">&times;</button>
+    </div>
+    <nav class="flex-1 px-4 space-y-1 overflow-y-auto custom-scrollbar">
+        <button onclick="showView('dashboard'); if(window.innerWidth<768) toggleSidebar()"  class="nav-link w-full flex items-center p-4 rounded-2xl transition-all text-sm font-bold"><i class="fas fa-th-large mr-4"></i> Command Center</button>
+        <button onclick="showView('bookings'); if(window.innerWidth<768) toggleSidebar()"   class="nav-link w-full flex items-center p-4 rounded-2xl transition-all text-sm font-bold text-red-500"><i class="fas fa-plus-circle mr-4"></i> Quick Booking</button>
+        <div class="h-px bg-slate-800 my-4 mx-4"></div>
+        <button onclick="showView('customers'); if(window.innerWidth<768) toggleSidebar()"  class="nav-link w-full flex items-center p-4 rounded-2xl transition-all text-sm font-bold"><i class="fas fa-users mr-4"></i> Customers</button>
+        <button onclick="showView('vehicles'); if(window.innerWidth<768) toggleSidebar()"   class="nav-link w-full flex items-center p-4 rounded-2xl transition-all text-sm font-bold"><i class="fas fa-car mr-4"></i> Vehicle Fleet</button>
+        <button onclick="showView('rescheduled'); if(window.innerWidth<768) toggleSidebar()" class="nav-link w-full flex items-center p-4 rounded-2xl transition-all text-sm font-bold text-orange-400"><i class="fas fa-calendar-alt mr-4"></i> Booking Management</button>
+        <button onclick="showView('fees'); if(window.innerWidth<768) toggleSidebar()"       class="nav-link w-full flex items-center p-4 rounded-2xl transition-all text-sm font-bold text-yellow-500"><i class="fas fa-file-invoice-dollar mr-4"></i> Service Fees</button>
+        <button onclick="showView('stocks'); if(window.innerWidth<768) toggleSidebar()"     class="nav-link w-full flex items-center p-4 rounded-2xl transition-all text-sm font-bold text-blue-400"><i class="fas fa-chart-pie mr-4"></i> Investment</button>
+        <div class="h-px bg-slate-800 my-4 mx-4"></div>
+        <button onclick="showView('geninfo'); if(window.innerWidth<768) toggleSidebar()"    class="nav-link w-full flex items-center p-4 rounded-2xl transition-all text-sm font-bold text-purple-400"><i class="fas fa-id-card-alt mr-4"></i> General Info</button>
+        <button onclick="showView('budget'); if(window.innerWidth<768) toggleSidebar()"     class="nav-link w-full flex items-center p-4 rounded-2xl transition-all text-sm font-bold text-green-500 border border-green-900/30 bg-green-900/5"><i class="fas fa-chart-line mr-4"></i> Budget &amp; Profit</button>
+    </nav>
+    <div class="p-4"><button onclick="hardResetSystem()" class="w-full text-[8px] uppercase font-black text-slate-700 hover:text-red-500 transition-colors">Clear All Local Storage</button></div>
+</aside>
+
+<!-- ── MAIN ─────────────────────────────────────────────────────────────── -->
+<main class="flex-1 flex flex-col overflow-hidden w-full relative">
+    <header class="h-auto min-h-[5rem] py-4 border-b border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between px-6 md:px-10 bg-slate-900/30 gap-4">
+        <div class="flex items-center gap-4 w-full md:w-auto justify-between md:justify-start">
+            <button onclick="toggleSidebar()" class="md:hidden text-slate-400 hover:text-white text-2xl focus:outline-none">
+                <i class="fas fa-bars"></i>
+            </button>
+            <h2 id="view-title" class="text-xs font-black tracking-widest text-slate-500 uppercase italic truncate">Command Center</h2>
+        </div>
+        <div class="flex items-center gap-3 w-full md:w-auto">
+            <div class="bg-slate-900 border border-slate-700 rounded-full px-5 py-2 flex items-center flex-1 md:w-auto">
+                <i class="fas fa-search text-slate-500 text-xs mr-3 shrink-0"></i>
+                <input type="text" onkeyup="renderData(this.value)" placeholder="Global master search..." class="bg-transparent text-xs outline-none w-full md:w-64 text-white font-bold">
+            </div>
+            <span id="_syncBadge" class="text-[10px] font-black shrink-0 hidden md:inline" style="color:#6ee7b7;">☁️ Connecting…</span>
+        </div>
+    </header>
+    <div class="flex-1 overflow-y-auto p-4 md:p-10 bg-[#070a13] custom-scrollbar">
+        <div id="view-dashboard"   class="view-content active space-y-12"></div>
+        <div id="view-jobs"        class="view-content space-y-8"></div>
+        <div id="view-customers"   class="view-content space-y-8"></div>
+        <div id="view-vehicles"    class="view-content space-y-8"></div>
+        <div id="view-rescheduled" class="view-content space-y-8"></div>
+        <div id="view-stocks"      class="view-content space-y-8"></div>
+        <div id="view-budget"      class="view-content space-y-8"></div>
+        <div id="view-fees"        class="view-content space-y-8"></div>
+        <div id="view-geninfo"     class="view-content space-y-8"></div>
+
+        <div id="view-bookings" class="view-content max-w-2xl mx-auto">
+            <div class="bg-slate-900 p-5 md:p-10 rounded-[40px] border border-slate-800 shadow-2xl">
+                <h3 class="text-2xl font-black italic uppercase text-red-600 mb-8 text-center underline">Process New Intake</h3>
+                <form onsubmit="saveBooking(event)" class="space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input type="date" id="b-date" required onchange="updateAvailableTimes()" class="bg-slate-950 p-4 rounded-2xl border border-slate-800 outline-none text-white font-bold">
+                        <select id="b-time" required class="bg-slate-950 p-4 rounded-2xl border border-slate-800 outline-none text-white font-bold">
+                            <option value="">— Select Time —</option>
+                        </select>
+                    </div>
+                    <input type="text"  id="b-name"  placeholder="Full Customer Name" required class="w-full bg-slate-950 p-4 rounded-2xl border border-slate-800 outline-none font-bold text-white">
+                    <input type="tel"   id="b-phone" placeholder="Mobile Number"      required class="w-full bg-slate-950 p-4 rounded-2xl border border-slate-800 outline-none text-white font-bold">
+                    <input type="email" id="b-email" placeholder="Email Address (optional)" class="w-full bg-slate-950 p-4 rounded-2xl border border-slate-800 outline-none text-white">
+                    <input type="text"  id="b-rego"  placeholder="PLATE" required class="w-full bg-slate-950 p-8 rounded-3xl border-2 border-dashed border-slate-800 text-center text-4xl font-black text-orange-500 uppercase outline-none">
+                    <textarea id="b-report" placeholder="Service notes..." rows="3" class="w-full bg-slate-950 p-4 rounded-2xl border border-slate-800 outline-none text-white italic"></textarea>
+                    <button type="submit" class="w-full bg-red-600 py-5 rounded-2xl font-black uppercase tracking-widest hover:bg-red-700 transition-all shadow-xl">Complete Entry</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</main>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     SERVICE REPORT MODAL
+═══════════════════════════════════════════════════════════════════════ -->
+<div id="manageModal" class="modal">
+    <div class="bg-slate-900 w-full max-w-6xl rounded-[40px] border border-slate-800 shadow-2xl max-h-[95vh] overflow-y-auto custom-scrollbar relative flex flex-col">
+
+        <!-- ── Modal Header ─────────────────────────────────────────── -->
+        <div class="flex items-center justify-between px-10 py-7 border-b border-slate-800 sticky top-0 bg-slate-900 z-10 rounded-t-[40px]">
+            <div>
+                <h3 class="text-2xl font-black uppercase text-white italic tracking-tighter">Service Report</h3>
+                <p id="m-job-display" class="text-xs text-red-500 font-bold mt-0.5 uppercase font-mono"></p>
+            </div>
+
+            <!-- Status Pills -->
+            <div class="flex gap-2">
+                <button type="button" id="pill-Unstarted"   onclick="setJobStatus('Unstarted')"   class="status-pill">🛑 Not Started</button>
+                <button type="button" id="pill-In Progress" onclick="setJobStatus('In Progress')" class="status-pill">🔧 In Progress</button>
+                <button type="button" id="pill-Completed"   onclick="setJobStatus('Completed')"   class="status-pill">✅ Completed</button>
+                <button type="button" id="pill-Cancelled"   onclick="setJobStatus('Cancelled')"   class="status-pill">❌ Cancelled</button>
+            </div>
+
+            <!-- Close / Delete / Invoice -->
+            <div class="flex items-center gap-3">
+                <button type="button" id="btn-invoice" onclick="generateInvoice()" class="bg-blue-900/60 border border-blue-700/60 text-blue-300 hover:bg-blue-800 hover:text-white px-5 py-2 rounded-2xl text-xs font-black uppercase transition-all hidden shadow-lg"><i class="fas fa-file-invoice mr-1"></i> Invoice</button>
+                <button type="button" onclick="deleteCurrentJob()" class="bg-red-950 border border-red-800 text-red-400 hover:bg-red-900 px-5 py-2 rounded-2xl text-xs font-black uppercase transition-all"><i class="fas fa-trash mr-1"></i> Delete Job</button>
+                <button type="button" onclick="closeModal()" class="text-3xl text-slate-500 hover:text-white leading-none">&times;</button>
+            </div>
+        </div>
+
+        <!-- ── Modal Body ────────────────────────────────────────────── -->
+        <form id="manageForm" onsubmit="updateJob(event)" class="p-5 md:p-10 space-y-8">
+            <input type="hidden" id="m-job-id">
+            <input type="hidden" id="m-job-status" value="Unstarted">
+
+            <!-- ROW 1: Customer  |  Specs DNA + Logbook -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                <!-- Customer Details -->
+                <div class="p-6 bg-slate-950 rounded-3xl border border-slate-800 space-y-3">
+                    <label class="text-[10px] font-black text-blue-400 uppercase block italic tracking-widest">Customer Details</label>
+                    <input type="text"  id="m-cust-name"  placeholder="Full Name"       class="w-full bg-slate-900 p-3 rounded-xl border border-slate-800 text-white font-bold outline-none text-sm">
+                    <input type="tel"   id="m-cust-phone" placeholder="Mobile Number"   class="w-full bg-slate-900 p-3 rounded-xl border border-slate-800 text-white outline-none text-sm">
+                    <input type="email" id="m-cust-email" placeholder="Email Address"   class="w-full bg-slate-900 p-3 rounded-xl border border-slate-800 text-white outline-none italic text-sm">
+                </div>
+
+                <!-- Specs DNA + Vehicle Logbook (combined) -->
+                <div class="p-6 bg-slate-950 rounded-3xl border border-slate-800 space-y-4">
+                    <div class="flex justify-between items-center">
+                        <label class="text-[10px] font-black text-orange-400 uppercase italic tracking-widest">Specs DNA &amp; Logbook</label>
+                        <span id="m-rego-display" class="bg-orange-600 text-white px-3 py-1 rounded-lg font-black text-xs uppercase tracking-widest">REGO</span>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                        <input type="text" id="m-make"     placeholder="Make"       class="bg-slate-900 p-3 rounded-xl border border-slate-800 text-white font-bold outline-none text-sm">
+                        <input type="text" id="m-model"    placeholder="Model"      class="bg-slate-900 p-3 rounded-xl border border-slate-800 text-white font-bold outline-none text-sm">
+                        <input type="text" id="m-capacity" placeholder="Engine Cap" class="bg-slate-900 p-3 rounded-xl border border-slate-800 text-red-400 font-black outline-none text-sm">
+                    </div>
+                    
+                    <div class="flex items-center gap-3 p-3 bg-slate-900 rounded-xl border border-slate-800 mb-3">
+                        <div class="flex-1">
+                            <p class="text-[9px] font-black uppercase text-slate-500 mb-1">Customer Odometer (Km)</p>
+                            <input type="number" id="m-km" placeholder="e.g. 150000" oninput="calcKmTotal()" class="w-full bg-slate-950 p-2 rounded-lg border border-slate-800 text-white font-mono text-xs outline-none">
+                        </div>
+                        <div class="shrink-0 pt-4 text-slate-500 font-bold px-1">+</div>
+                        <div class="w-24 shrink-0">
+                            <p class="text-[9px] font-black uppercase text-slate-500 mb-1">Interval</p>
+                            <select id="m-km-interval" onchange="calcKmTotal()" class="w-full bg-slate-950 p-2 rounded-lg border border-slate-800 text-white font-mono text-xs outline-none">
+                                <option value="5000">5k</option>
+                                <option value="10000" selected>10k</option>
+                                <option value="15000">15k</option>
+                            </select>
+                        </div>
+                        <div class="flex-1 text-right">
+                            <p class="text-[9px] font-black uppercase text-green-500 mb-1">Next Service Due at</p>
+                            <p id="m-km-result" class="text-lg font-black text-white italic">—</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Logbook appended here -->
+                    <div class="pt-3 border-t border-slate-800">
+                        <p class="text-[9px] font-black text-yellow-500 uppercase tracking-widest mb-2">Vehicle Logbook</p>
+                        <div class="flex gap-2">
+                            <input type="text" id="m-vinfo-new" placeholder="Add logbook note..." class="flex-1 bg-slate-900 p-2 rounded-xl border border-slate-800 text-xs text-white outline-none italic">
+                            <button type="button" onclick="appendVehicleNote()" class="bg-yellow-700 hover:bg-yellow-600 text-white px-4 rounded-xl text-[10px] font-black uppercase transition-colors">Add</button>
+                        </div>
+                        <div id="m-vinfo-history" class="mt-2 max-h-24 overflow-y-auto space-y-1 custom-scrollbar"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ROW 2: Parts & Materials -->
+            <div class="p-6 bg-slate-950 rounded-3xl border border-slate-800 space-y-4">
+                <div class="flex justify-between items-center">
+                    <label class="text-[10px] font-black text-purple-400 uppercase tracking-widest italic">Parts &amp; Materials</label>
+                    <button type="button" onclick="addPartRow()" class="bg-purple-900/40 border border-purple-700/50 text-purple-300 hover:bg-purple-700 hover:text-white px-5 py-2 rounded-xl text-[10px] font-black uppercase transition-all"><i class="fas fa-plus mr-1"></i> Add Part</button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs">
+                        <thead>
+                            <tr class="text-[10px] font-black text-slate-500 uppercase text-left">
+                                <th class="pb-2 pr-3" style="min-width:180px">Description</th>
+                                <th class="pb-2 pr-3" style="min-width:65px">Qty</th>
+                                <th class="pb-2 pr-3" style="min-width:100px">Cost $</th>
+                                <th class="pb-2 pr-3" style="min-width:90px">Markup %</th>
+                                <th class="pb-2 pr-3" style="min-width:110px">Sell Price $</th>
+                                <th class="pb-2 pr-3" style="min-width:110px">Line Total</th>
+                                <th class="pb-2" style="min-width:36px"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="parts-tbody"></tbody>
+                    </table>
+                </div>
+                <div class="flex justify-end pt-2 border-t border-slate-800">
+                    <div class="text-right">
+                        <p class="text-[9px] font-black text-slate-500 uppercase">Parts Subtotal</p>
+                        <p id="parts-subtotal" class="text-xl font-black text-white">$0.00</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ROW 3: Labour -->
+            <div class="p-6 bg-slate-950 rounded-3xl border border-slate-800 space-y-4">
+                <label class="text-[10px] font-black text-green-400 uppercase tracking-widest italic block">Labour Charge</label>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <p class="text-[9px] text-slate-500 font-black uppercase mb-2">Quick-Select from Service Fees</p>
+                        <select id="m-fee-select" onchange="applyServiceFee(this.value)" class="w-full bg-slate-900 p-3 rounded-2xl border border-slate-700 text-yellow-400 font-black text-xs outline-none">
+                            <option value="">— Select Fee —</option>
+                        </select>
+                    </div>
+                    <div>
+                        <p class="text-[9px] text-slate-500 font-black uppercase mb-2">Labour Amount</p>
+                        <div class="relative">
+                            <span class="absolute left-4 top-1/2 -translate-y-1/2 text-green-400 font-black text-lg">$</span>
+                            <input type="number" id="m-labour" step="0.01" min="0" oninput="calcGrandTotal()" placeholder="0.00"
+                                class="w-full bg-slate-900 pl-8 pr-4 py-3 rounded-2xl border border-green-900/60 text-green-400 font-black text-2xl outline-none">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ROW 4: Technical Report -->
+            <div>
+                <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest italic block mb-2">Technical Report / Work Notes</label>
+                <textarea id="m-report" rows="3" placeholder="Describe work performed..."
+                    class="w-full bg-slate-950 p-5 rounded-3xl border border-slate-800 text-sm italic text-slate-300 outline-none resize-none"></textarea>
+            </div>
+
+            <!-- ROW 5: Evidence Photos -->
+            <div class="p-6 bg-slate-950 rounded-3xl border border-slate-800 space-y-4">
+                <div class="flex justify-between items-center">
+                    <label class="text-[10px] font-black text-sky-400 uppercase tracking-widest italic"><i class="fas fa-camera mr-1"></i> Evidence Photos</label>
+                    <label for="photo-upload-input" class="bg-sky-900/40 border border-sky-700/50 text-sky-300 hover:bg-sky-700 hover:text-white px-5 py-2 rounded-xl text-[10px] font-black uppercase transition-all cursor-pointer">
+                        <i class="fas fa-plus mr-1"></i> Add Photos
+                    </label>
+                    <input type="file" id="photo-upload-input" accept="image/*" multiple class="hidden" onchange="addJobPhotos(this)">
+                </div>
+                <div id="photo-grid" class="grid grid-cols-2 sm:grid-cols-4 gap-3"></div>
+                <p id="photo-empty" class="text-[10px] text-slate-600 italic text-center py-4">No photos attached yet.</p>
+            </div>
+
+            <!-- ROW 6: Grand Total Summary -->
+            <div class="bg-slate-950 rounded-3xl border border-slate-700 p-6">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center mb-6">
+                    <div class="bg-slate-900 p-4 rounded-2xl border border-slate-800">
+                        <p class="text-[9px] font-black text-purple-400 uppercase">Parts Total</p>
+                        <p id="gt-parts"  class="text-xl font-black text-white mt-1">$0.00</p>
+                    </div>
+                    <div class="bg-slate-900 p-4 rounded-2xl border border-slate-800">
+                        <p class="text-[9px] font-black text-green-400 uppercase">Labour</p>
+                        <p id="gt-labour" class="text-xl font-black text-white mt-1">$0.00</p>
+                    </div>
+                    <div class="bg-red-950 p-4 rounded-2xl border border-red-700">
+                        <p class="text-[9px] font-black text-red-400 uppercase">Grand Total</p>
+                        <p id="gt-total"  class="text-2xl font-black text-white mt-1">$0.00</p>
+                    </div>
+                </div>
+                <div class="flex gap-3">
+                    <button type="button" onclick="closeModal()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 py-4 rounded-2xl font-black uppercase text-xs tracking-widest transition-all">Cancel</button>
+                    <button type="submit" class="flex-[3] bg-red-600 hover:bg-red-700 py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl transition-all text-sm">Save &amp; Secure Record</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ── PROFILE MODAL ──────────────────────────────────────────────────── -->
+<div id="profileModal" class="modal">
+    <div class="bg-slate-900 w-full max-w-5xl rounded-[40px] p-5 md:p-10 border border-slate-800 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
+        <div class="flex justify-between items-start mb-10 border-b border-slate-800 pb-8">
+            <div>
+                <h3 id="p-title"    class="text-4xl font-black uppercase italic tracking-tighter text-white">Profile</h3>
+                <p  id="p-subtitle" class="text-slate-500 font-bold uppercase text-[10px] mt-2 italic"></p>
+            </div>
+            <button onclick="closeModal()" class="text-4xl text-slate-500 hover:text-white">&times;</button>
+        </div>
+        <div id="p-dynamic-content" class="space-y-12"></div>
+        <div class="mt-12 space-y-6">
+            <h4 class="text-xs font-black uppercase text-slate-500 tracking-widest px-2 underline italic">Full history record</h4>
+            <div class="bg-slate-950 rounded-[40px] border border-slate-800 overflow-hidden shadow-2xl">
+                <table class="w-full text-left text-xs"><tbody id="p-history-table" class="divide-y divide-slate-900"></tbody></table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── STOCK MODAL ───────────────────────────────────────────────────── -->
+<div id="stockModal" class="modal">
+    <div class="bg-slate-900 w-full max-w-md rounded-[40px] p-5 md:p-10 border border-slate-800 shadow-2xl">
+        <h3 id="stock-modal-title" class="text-xl font-black uppercase text-white mb-6 italic underline text-center">Log Asset</h3>
+        <form onsubmit="saveStockItem(event)" class="space-y-4">
+            <input type="hidden" id="s-index" value="-1">
+            <input type="date" id="s-date" required class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white outline-none">
+            <select id="s-type" class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white font-bold">
+                <option value="Tools">Workshop Tooling</option>
+                <option value="Accessories">Accessories</option>
+            </select>
+            <input type="text" id="s-item" placeholder="Description" required class="w-full bg-slate-950 p-3 rounded-xl border border-slate-800 text-white font-bold outline-none">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <input type="number" id="s-qty"   placeholder="Qty"      required class="bg-slate-950 p-3 rounded-xl border border-slate-800 text-white outline-none font-black">
+                <input type="number" id="s-price" placeholder="Price $" step="0.01" required class="bg-slate-950 p-3 rounded-xl border border-slate-800 text-white outline-none font-black text-green-500">
+            </div>
+            <div class="flex gap-2 pt-2">
+                <button type="submit" class="flex-1 bg-blue-600 py-4 rounded-2xl font-black uppercase text-[10px]">Save Asset</button>
+                <button type="button" id="s-delete-btn" onclick="deleteStockItem()" class="hidden flex-1 bg-red-900/30 text-red-500 py-4 rounded-2xl font-black uppercase text-[10px] border border-red-900/50">Delete</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ── FEE MODAL ─────────────────────────────────────────────────────── -->
+<div id="feeModal" class="modal">
+    <div class="bg-slate-900 w-full max-w-md rounded-[40px] p-5 md:p-10 border border-slate-800 shadow-2xl">
+        <h3 id="fee-modal-title" class="text-xl font-black uppercase text-white mb-6 italic underline">Service Fee</h3>
+        <form onsubmit="saveServiceFee(event)" class="space-y-4">
+            <input type="hidden" id="fee-index" value="-1">
+            <input type="text"   id="fee-service" placeholder="Service Type" required class="w-full bg-slate-950 p-4 rounded-xl border border-slate-800 text-white font-bold">
+            <input type="number" id="fee-price"   placeholder="Price $" step="0.01" required class="w-full bg-slate-950 p-4 rounded-xl border border-slate-800 text-white font-black text-green-500">
+            <div class="flex gap-2 pt-4">
+                <button type="submit" id="fee-save-btn" class="flex-1 bg-yellow-600 py-4 rounded-2xl font-black uppercase text-[10px]">Save</button>
+                <button type="button" id="fee-delete-btn" onclick="deleteFeeReal()" class="hidden flex-1 bg-red-900/30 text-red-500 py-4 rounded-2xl font-black uppercase text-[10px] border border-red-900/50">Delete</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ── FOLDER MODAL ────────────────────────────────────────────────────── -->
+<div id="folderModal" class="modal">
+    <div class="bg-slate-900 w-full max-w-4xl rounded-[40px] p-5 md:p-8 border border-slate-800 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar flex flex-col gap-6 relative">
+        <button onclick="closeModal()" class="absolute top-8 right-8 text-3xl text-slate-500 hover:text-white">&times;</button>
+        <input type="hidden" id="f-id">
+        <div class="flex items-center gap-4 border-b border-slate-800 pb-6 w-11/12">
+            <span class="bg-blue-900/30 text-blue-400 w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shrink-0"><i class="fas fa-folder-open"></i></span>
+            <input type="text" id="f-name" class="bg-transparent border-none outline-none text-3xl font-black text-white italic w-full uppercase" placeholder="Folder Name" onchange="updateFolderName(this.value)">
+        </div>
+
+        <!-- Notes -->
+        <div class="bg-slate-950 p-6 rounded-3xl border border-slate-800 flex flex-col group relative cursor-pointer" onclick="openFolderNoteModal()">
+            <div class="flex justify-between items-center mb-4">
+                <h4 class="text-[10px] font-black uppercase text-yellow-500 tracking-widest"><i class="fas fa-sticky-note mr-2"></i>Folder Notes</h4>
+                <button class="bg-yellow-900/40 text-yellow-500 hover:bg-yellow-600 hover:text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all"><i class="fas fa-expand"></i> Edit</button>
+            </div>
+            <div class="flex-1 text-xs text-slate-400 italic line-clamp-6 leading-relaxed" id="f-notes-preview"></div>
+        </div>
+
+        <!-- Documents / Photos -->
+        <div class="bg-slate-950 p-6 rounded-3xl border border-slate-800">
+            <div class="flex justify-between items-center mb-4">
+                <h4 class="text-[10px] font-black uppercase text-purple-500 tracking-widest"><i class="fas fa-file-image mr-2"></i>Documents &amp; Images</h4>
+                <label for="f-file-input" class="bg-purple-900/40 text-purple-400 hover:bg-purple-600 hover:text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all cursor-pointer inline-block">
+                    <i class="fas fa-upload mr-1"></i> Upload
+                </label>
+                <input type="file" id="f-file-input" accept="image/*" multiple class="hidden" onchange="uploadFolderDocuments(this)">
+            </div>
+            <div id="f-docs-grid" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3"></div>
+            <p id="f-docs-empty" class="text-[10px] text-slate-600 italic text-center py-4 hidden">No documents attached.</p>
+        </div>
+    </div>
+</div>
+
+<!-- ── FOLDER NOTE EDITOR (FULL PAGE) ────────────────────────────────── -->
+<div id="folderNoteModal" class="modal" style="z-index:90000; background:rgba(0,0,0,0.9);">
+    <div class="bg-slate-950 w-full h-full p-8 flex flex-col">
+        <div class="flex justify-between items-center mb-6">
+            <h3 class="text-2xl font-black uppercase text-yellow-500 italic"><i class="fas fa-sticky-note mr-3"></i>Folder Notes Editor</h3>
+            <button onclick="closeFolderNoteModal()" class="bg-slate-800 hover:bg-slate-700 text-white px-6 py-3 rounded-2xl font-black uppercase text-xs transition-all tracking-widest">Done / Close</button>
+        </div>
+        <textarea id="f-note-editor" class="flex-1 w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 text-white text-sm font-mono leading-relaxed outline-none resize-none custom-scrollbar shadow-inner" placeholder="Ponder your thoughts here..."></textarea>
+    </div>
+</div>
+
+<!-- ── CUSTOMER INVOICE MODAL ────────────────────────────────────────── -->
+<div id="invoiceModal" class="modal" style="z-index: 100000;">
+    <div class="bg-slate-900 w-full max-w-5xl rounded-[40px] border border-slate-800 shadow-2xl max-h-[95vh] overflow-y-auto custom-scrollbar relative flex flex-col">
+        <!-- Header -->
+        <div class="flex items-center justify-between px-10 py-7 border-b border-slate-800 sticky top-0 bg-slate-900 z-10 rounded-t-[40px]">
+            <div>
+                <h3 class="text-3xl font-black uppercase text-white italic tracking-tighter">Tax Invoice</h3>
+                <p id="inv-job-display" class="text-sm text-slate-400 font-bold mt-1 uppercase font-mono"></p>
+            </div>
+            <div class="flex items-center gap-3">
+                <a id="inv-email-btn" href="#" class="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-2xl text-xs font-black uppercase transition-all shadow-lg hidden"><i class="fas fa-envelope mr-2"></i> Email Customer</a>
+                <button type="button" onclick="window.print()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-2xl text-xs font-black uppercase transition-all shadow-lg"><i class="fas fa-file-pdf mr-2"></i> Save as PDF / Print</button>
+                <button type="button" onclick="document.getElementById('invoiceModal').classList.remove('active')" class="bg-slate-800 hover:bg-slate-700 text-white px-6 py-3 rounded-2xl text-xs font-black uppercase transition-all shadow-lg">Close</button>
+            </div>
+        </div>
+
+        <div id="printable-invoice" class="p-10 space-y-8 bg-white text-slate-900 rounded-b-[40px]">
+            <!-- Header branding -->
+            <div class="flex justify-between items-start border-b-2 border-red-600 pb-8">
+                <div>
+                    <h1 class="text-4xl font-black text-red-600 italic uppercase tracking-tighter" style="color: #dc2626 !important;">Saturday Hobby Auto</h1>
+                    <p class="text-xs font-bold uppercase tracking-widest text-slate-500 mt-2">Buy • Sell • Repairs</p>
+                    <p class="text-[10px] font-bold text-slate-500 mt-3 whitespace-pre-wrap">Omo: 0477 201 809
+Min: 0423 107 047</p>
+                    <p class="text-[10px] font-bold text-slate-500 mt-1">saturdayhobby1@gmail.com</p>
+                </div>
+                <div class="text-right text-sm font-bold text-slate-600">
+                    <p>Date: <span id="inv-date"></span></p>
+                    <p>Invoice #: <span id="inv-no"></span></p>
+                </div>
+            </div>
+
+            <!-- Customer & Vehicle -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-8">
+                <div>
+                    <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Billed To</p>
+                    <p id="inv-cust-name" class="font-black text-lg"></p>
+                    <p id="inv-cust-phone" class="font-bold text-sm text-slate-600"></p>
+                    <p id="inv-cust-email" class="font-bold text-sm text-slate-600"></p>
+                </div>
+                <div>
+                    <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Vehicle Details</p>
+                    <p class="font-black text-lg"><span id="inv-rego" class="uppercase text-orange-600"></span></p>
+                    <p id="inv-make-model" class="font-bold text-sm text-slate-600"></p>
+                    <p id="inv-next-service" class="font-bold text-sm text-green-700 mt-1"></p>
+                </div>
+            </div>
+
+            <!-- Parts/Labour Table -->
+            <div class="pt-4">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-slate-100 text-[10px] font-black uppercase tracking-widest text-slate-600">
+                            <th class="p-3 border-b-2 border-slate-300">Description</th>
+                            <th class="p-3 border-b-2 border-slate-300 text-center">Qty</th>
+                            <th class="p-3 border-b-2 border-slate-300 text-right">Unit Price</th>
+                            <th class="p-3 border-b-2 border-slate-300 text-right">Line Total</th>
+                        </tr>
+                    </thead>
+                    <tbody id="inv-tbody" class="text-sm font-bold divide-y divide-slate-200">
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Totals -->
+            <div class="flex justify-end pt-8">
+                <div class="w-1/3 min-w-[250px] space-y-3 text-sm">
+                    <div class="flex justify-between font-bold text-slate-600">
+                        <span>Parts Total:</span>
+                        <span id="inv-parts-total"></span>
+                    </div>
+                    <div class="flex justify-between font-bold text-slate-600">
+                        <span>Labour Total:</span>
+                        <span id="inv-labour-total"></span>
+                    </div>
+                    <div class="flex justify-between font-black text-2xl text-red-600 pt-3 border-t-2 border-red-600" style="color: #dc2626 !important;">
+                        <span>Grand Total:</span>
+                        <span id="inv-grand-total"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Work Notes / Technical Report -->
+            <div id="inv-notes-section" class="pt-8 border-t border-slate-200">
+                <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2"><i class="fas fa-clipboard-list mr-1"></i> Technical Report / Work Notes</p>
+                <p id="inv-report" class="text-sm font-bold text-slate-700 italic whitespace-pre-wrap leading-relaxed bg-slate-50 rounded-xl p-4 border border-slate-200"></p>
+            </div>
+
+            <!-- Supporting Photo Evidence -->
+            <div id="inv-photos-section" class="pt-6">
+                <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3"><i class="fas fa-camera mr-1"></i> Supporting Evidence / Photos</p>
+                <div id="inv-photos-grid" class="grid grid-cols-2 sm:grid-cols-4 gap-3"></div>
+            </div>
+            
+            <div class="text-center pt-10 text-xs font-bold text-slate-400 italic border-t border-slate-100 mt-8">
+                Thank you for choosing Saturday Hobby Auto!
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── FINANCIAL BREAKDOWN MODAL ─────────────────────────────────────── -->
+<div id="financialBreakdownModal" class="modal">
+    <div class="bg-slate-900 w-full max-w-2xl rounded-[40px] p-8 border border-slate-800 shadow-2xl max-h-[85vh] overflow-hidden flex flex-col">
+        <div class="flex justify-between items-start mb-6 shrink-0">
+            <div>
+                <h3 id="fb-title" class="text-2xl font-black uppercase text-white italic">Breakdown</h3>
+                <p id="fb-subtitle" class="text-[10px] uppercase font-black text-slate-500 tracking-widest mt-1">Period Details</p>
+            </div>
+            <button onclick="closeModal()" class="text-3xl text-slate-500 hover:text-white">&times;</button>
+        </div>
+        <div class="flex-1 overflow-y-auto custom-scrollbar pr-2">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-slate-950 uppercase font-black text-slate-500 text-[9px] tracking-widest">
+                    <tr id="fb-table-head"></tr>
+                </thead>
+                <tbody id="fb-table-body" class="divide-y divide-slate-800 border-t border-slate-800"></tbody>
+            </table>
+        </div>
+        <div class="mt-6 pt-6 border-t border-slate-800 flex justify-between items-center shrink-0">
+            <p class="text-[10px] uppercase font-black text-slate-500">Total Calculation</p>
+            <h4 id="fb-total" class="text-2xl font-black text-green-400 italic">$0.00</h4>
+        </div>
+    </div>
+</div>
+
+<script>
+// ─── SECURITY ────────────────────────────────────────────────────────────────
+const MASTER_PIN = "1379";
+let isLocked = true, idleTimer;
+function checkPin() {
+    const input = document.getElementById('pin-field');
+    const entered = input.value.trim();
+    if (entered === MASTER_PIN) {
+        document.getElementById('lock-screen').style.display = 'none';
+        isLocked = false;
+        input.value = '';
+        input.style.borderColor = '#1e293b';
+        resetIdleTimer();
+    } else if (entered.length === 4) {
+        // Wrong PIN — only shake on a full 4-digit attempt
+        input.value = '';
+        input.style.borderColor = '#ef4444';
+        setTimeout(() => input.style.borderColor = '#1e293b', 800);
+    }
+}
+function lockSystem() { document.getElementById('lock-screen').style.display = 'flex'; isLocked = true; }
+function resetIdleTimer() { if (isLocked) return; clearTimeout(idleTimer); idleTimer = setTimeout(lockSystem, 10 * 60 * 1000); }
+['mousemove','mousedown','touchstart','keypress','scroll'].forEach(e => window.addEventListener(e, resetIdleTimer));
+
+// ─── DATABASE ────────────────────────────────────────────────────────────────
+const repairCosts = [
+    // 🟢 BASIC / QUICK JOBS (0.3 – 1.0 hr)
+    { service: '🟢 Oil & Filter Change',                   price: 115 },
+    { service: '🟢 Air Filter Replacement',                price: 40  },
+    { service: '🟢 Cabin Filter Replacement',              price: 55  },
+    { service: '🟢 Battery Replacement',                   price: 70  },
+    { service: '🟢 Wiper Replacement',                     price: 25  },
+    { service: '🟢 Bulb Replacement (Headlight/Taillight)', price: 60 },
+    { service: '🟢 Tyre Rotation',                         price: 40  },
+    { service: '🟢 Wheel Balancing (per wheel)',           price: 35  },
+    // 🟡 STANDARD SERVICE JOBS (1 – 2 hrs)
+    { service: '🟡 Minor Service',                         price: 150 },
+    { service: '🟡 Logbook Service',                       price: 225 },
+    { service: '🟡 Brake Pad Replacement (Front or Rear)', price: 185 },
+    { service: '🟡 Brake Fluid Flush',                     price: 130 },
+    { service: '🟡 Coolant Flush',                         price: 150 },
+    { service: '🟡 Spark Plug Replacement',                price: 165 },
+    { service: '🟡 Fuel Filter Replacement',               price: 130 },
+    // 🟠 INTERMEDIATE REPAIRS (2 – 4 hrs)
+    { service: '🟠 Brake Discs + Pads',                    price: 375 },
+    { service: '🟠 Alternator Replacement',                price: 250 },
+    { service: '🟠 Starter Motor Replacement',             price: 250 },
+    { service: '🟠 Radiator Replacement',                  price: 300 },
+    { service: '🟠 Suspension (Shock/Strut Replacement)',  price: 350 },
+    { service: '🟠 Wheel Bearing Replacement',             price: 350 },
+    { service: '🟠 Drive Belt / Serpentine Belt',          price: 210 },
+    // 🔴 MAJOR REPAIRS (4 – 8 hrs)
+    { service: '🔴 Clutch Replacement',                    price: 850 },
+    { service: '🔴 Timing Belt Replacement',               price: 650 },
+    { service: '🔴 Head Gasket Repair',                    price: 1750 },
+    { service: '🔴 Transmission Service (Auto)',           price: 425 },
+    { service: '🔴 Steering Rack Replacement',             price: 650 },
+    // ⚫ HEAVY / COMPLEX JOBS (8+ hrs)
+    { service: '⚫ Engine Replacement',                    price: 2750 },
+    { service: '⚫ Transmission Rebuild/Replacement',      price: 2500 },
+    { service: '⚫ Full Engine Rebuild',                   price: 4000 },
+    // 🧰 DIAGNOSTIC & SPECIALISED
+    { service: '🧰 Diagnostic Scan',                       price: 130 },
+    { service: '🧰 Electrical Fault Tracing (per hr)',     price: 160 },
+    { service: '🧰 Aircon Regas / Service',                price: 175 },
+    { service: '🧰 Pre-Purchase Inspection',               price: 225 },
+    // 🧾 SERVICE PACKAGES
+    { service: '🧾 Package — Minor Service',               price: 225 },
+    { service: '🧾 Package — Standard Service',            price: 375 },
+    { service: '🧾 Package — Major Service',               price: 600 }
+];
+
+const initialJobs = [
+    { jobNo:'JOB-99001', date:'2026-04-19', time:'08:00', name:'Marcus Aurelius', phone:'0400 111 222', email:'', rego:'GLADIATOR', status:'In Progress',  labour:150, report:'', parts:[] },
+    { jobNo:'JOB-99002', date:'2026-04-19', time:'10:00', name:'John Wick',       phone:'0400 007 007', email:'', rego:'BABA-YAGA',  status:'Unstarted',    labour:500, report:'', parts:[] },
+    { jobNo:'JOB-99003', date:'2026-04-18', time:'09:00', name:'Oscar Wilde',     phone:'0411 999 888', email:'', rego:'POET-88',    status:'Completed',    labour:200, report:'Full service completed.', parts:[{desc:'Oil Filter',qty:1,cost:12,markup:50,sellPrice:18}] }
+];
+const initialVehicles = {
+    'GLADIATOR': { owner:'Marcus Aurelius', make:'Jeep',   model:'Gladiator', year:'2022', capacity:'3.0L', info:[] },
+    'BABA-YAGA': { owner:'John Wick',       make:'Ford',   model:'Mustang',   year:'2019', capacity:'5.0L', info:[] },
+    'POET-88':   { owner:'Oscar Wilde',     make:'Toyota', model:'Camry',     year:'2018', capacity:'2.5L', info:[] }
+};
+
+let db = JSON.parse(localStorage.getItem('sha_v102_db')) || {
+    jobs: initialJobs, vehicles: initialVehicles, customers: {}, stock: [], receipts: [], serviceFees: repairCosts, folders: [], investmentBudget: 0, webLinks: []
+};
+if (db.investmentBudget === undefined) db.investmentBudget = 0;
+if (!db.folders)   db.folders   = [];
+if (!db.webLinks)  db.webLinks  = [];
+if (!db.customers) db.customers = {};
+// Migrate existing job contacts into standalone customer store
+db.jobs.forEach(j => { if (j.name && !db.customers[j.name]) db.customers[j.name] = { name: j.name, phone: j.phone||'', email: j.email||'' }; });
+// ── Auto-upgrade service fees if stale (fewer than 10 entries = old placeholder list)
+if (!db.serviceFees || db.serviceFees.length < 10) { db.serviceFees = repairCosts; }
+
+// Shop notes legacy migration to Folders (Links stay native now)
+if (db.shopNotes && db.shopNotes.length > 0) {
+    db.folders.push({
+        id: 'legacy-notes-' + Date.now(),
+        name: 'Legacy Shop Notes',
+        notes: db.shopNotes.join('\n\n'),
+        links: [],
+        documents: []
+    });
+    delete db.shopNotes;
+}
+
+// migration safety
+db.jobs.forEach(j => {
+    if (!j.parts)  j.parts  = [];
+    if (!j.photos) j.photos = [];
+    if (!j.report) j.report = '';
+    if (!j.email)  j.email  = '';
+});
+
+const todayDate = new Date().toISOString().split('T')[0];
+let activeView = 'dashboard', currentFilter = 'All', assetTab = 'Tools', genInfoTab = 'Customer', myChart = null, budgetFilter = 'lifetime';
+let calViewMode = 'month';                          // 'day' | 'week' | 'month' | 'year'
+let calFocusDate = new Date(new Date().toISOString().split('T')[0]); // anchor date
+
+function sync() {
+    // 1. Always write locally first (instant, offline-safe)
+    localStorage.setItem('sha_v102_db', JSON.stringify(db));
+    // 2. Push to Firestore for cross-device sync
+    if (window.__fsPush) {
+        if (window.showSyncStatus) window.showSyncStatus('saving');
+        window.__fsPush(db);
+    }
+}
+function hardResetSystem() {
+    if (confirm('Delete ALL data? This will clear data on ALL devices.')) {
+        localStorage.removeItem('sha_v102_db');
+        if (window.__fsDelete) window.__fsDelete();
+        location.reload();
+    }
+}
+function closeModal()      { document.querySelectorAll('.modal').forEach(m => m.classList.remove('active')); }
+
+// ─── NAVIGATION ──────────────────────────────────────────────────────────────
+function showView(id) {
+    document.querySelectorAll('.view-content').forEach(v => v.classList.remove('active'));
+    const el = document.getElementById('view-' + id);
+    if (el) el.classList.add('active');
+    const titles = { dashboard:'Command Center', bookings:'Quick Booking', customers:'Customers', vehicles:'Vehicle Fleet', rescheduled:'Booking Management & Job Registry', fees:'Service Fees', stocks:'Investment', geninfo:'General Info', budget:'Budget & Profit' };
+    document.getElementById('view-title').innerText = titles[id] || id.toUpperCase();
+    activeView = id;
+    if (activeView === 'budget' && !window.budgetChart) budgetFilter = 'lifetime';
+    if (id === 'bookings') {
+        const dInput = document.getElementById('b-date');
+        if (!dInput.value) dInput.value = todayDate;
+        updateAvailableTimes();
+    }
+    renderData();
+}
+function filterJobs(s)    { currentFilter = s; renderData(); }
+function setAssetTab(t)   { assetTab   = t; renderData(); }
+function setGenInfoTab(t) { genInfoTab = t; renderData(); }
+
+// ─── RENDER ENGINE ───────────────────────────────────────────────────────────
+function renderData(term = '') {
+    const t = term.toLowerCase();
+    let cUn=0, cPr=0, cCo=0, tMarkup=0, tLab=0, workshopProfit=0;
+    const custs = {};
+
+    db.jobs.forEach(j => {
+        const ps = (j.parts||[]).reduce((s,p) => s + p.qty * p.sellPrice, 0);
+        const pc = (j.parts||[]).reduce((s,p) => s + p.qty * p.cost,      0);
+        const profit = parseFloat(j.labour||0) + (ps - pc);
+        if (j.status==='Completed') { workshopProfit += profit; tMarkup += (ps-pc); tLab += parseFloat(j.labour||0); }
+        if (j.status==='Unstarted')   cUn++;
+        if (j.status==='In Progress') cPr++;
+        if (j.status==='Completed')   cCo++;
+        if (!custs[j.name]) custs[j.name] = { name:j.name, phone:j.phone, email:j.email||'', cars:[] };
+        if (!custs[j.name].cars.includes(j.rego)) custs[j.name].cars.push(j.rego);
+        if (!db.vehicles[j.rego]) db.vehicles[j.rego] = { owner:j.name, make:'', model:'', year:'', capacity:'', info:[] };
+    });
+
+    // ── DASHBOARD ────────────────────────────────────────────────────────────
+    if (activeView === 'dashboard') {
+        const totalGross = tMarkup + tLab;
+        const emer = Math.min(4000, totalGross * 0.50);
+        const sav  = Math.max(0, (totalGross * 0.50) - 4000);
+        
+        document.getElementById('view-dashboard').innerHTML = `
+        <!-- Quick Actions Deck -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+            <button onclick="showView('bookings')" class="p-4 bg-red-900/30 hover:bg-red-800/50 border border-red-800/50 rounded-3xl text-left transition-all group shadow-lg">
+                <i class="fas fa-plus-circle text-red-500 text-2xl mb-2 group-hover:scale-110 transition-transform block"></i>
+                <h4 class="text-white font-black text-sm">New Booking</h4>
+                <p class="text-[9px] text-slate-400 uppercase mt-1">Intake Form</p>
+            </button>
+            <button onclick="showView('vehicles')" class="p-4 bg-slate-900 border border-slate-700 hover:border-slate-500 rounded-3xl text-left transition-all group shadow-lg">
+                <i class="fas fa-car text-blue-400 text-2xl mb-2 group-hover:scale-110 transition-transform block"></i>
+                <h4 class="text-white font-black text-sm">Vehicle Fleet</h4>
+                <p class="text-[9px] text-slate-400 uppercase mt-1">${Object.keys(db.vehicles).length} Registered</p>
+            </button>
+            <button onclick="showView('customers')" class="p-4 bg-slate-900 border border-slate-700 hover:border-slate-500 rounded-3xl text-left transition-all group shadow-lg">
+                <i class="fas fa-users text-purple-400 text-2xl mb-2 group-hover:scale-110 transition-transform block"></i>
+                <h4 class="text-white font-black text-sm">Customers</h4>
+                <p class="text-[9px] text-slate-400 uppercase mt-1">Client Vault</p>
+            </button>
+            <button onclick="showView('budget')" class="p-4 bg-green-900/10 hover:bg-green-900/30 border border-green-900/40 rounded-3xl text-left transition-all group shadow-lg">
+                <i class="fas fa-chart-line text-green-500 text-2xl mb-2 group-hover:scale-110 transition-transform block"></i>
+                <h4 class="text-white font-black text-sm">Budget Engine</h4>
+                <p class="text-[9px] text-slate-400 uppercase mt-1">Financial Data</p>
+            </button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div class="stat-card-click border-red-500 text-center shadow-xl"><p class="text-[10px] uppercase font-black text-slate-400">Emergency</p><h3 class="text-3xl font-black text-white mt-1">$${emer.toFixed(2)}</h3></div>
+            <div class="stat-card-click border-blue-500 text-center shadow-xl"><p class="text-[10px] uppercase font-black text-slate-400">Savings</p><h3 class="text-3xl font-black text-white mt-1">$${sav.toFixed(2)}</h3></div>
+            <div class="stat-card-click border-blue-400 text-center shadow-xl"><p class="text-[10px] uppercase font-black text-slate-400">Invest</p><h3 class="text-3xl font-black text-white mt-1">$${(totalGross*0.25).toFixed(2)}</h3></div>
+            <div class="stat-card-click border-green-500 text-center shadow-xl"><p class="text-[10px] uppercase font-black text-slate-400">Total Profit</p><h3 class="text-3xl font-black text-green-400 mt-1">$${workshopProfit.toLocaleString('en-AU',{minimumFractionDigits:2})}</h3></div>
+        </div>
+        <div class="chart-container w-full shadow-2xl mt-8"><canvas id="financialChart"></canvas></div>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mt-10">
+            <div class="bg-slate-900 rounded-[40px] border border-slate-800 overflow-hidden shadow-2xl"><div class="p-6 border-b border-slate-800 font-black text-red-500 italic uppercase text-sm"><i class="fas fa-stop-circle mr-2"></i> Unstarted (${cUn})</div><div class="overflow-x-auto"><table class="w-full text-left text-[11px]"><tbody id="dash-unstarted" class="divide-y divide-slate-800"></tbody></table></div></div>
+            <div class="bg-slate-900 rounded-[40px] border border-slate-800 overflow-hidden shadow-2xl"><div class="p-6 border-b border-slate-800 font-black text-orange-500 italic uppercase text-sm"><i class="fas fa-wrench mr-2"></i> In Progress (${cPr})</div><div class="overflow-x-auto"><table class="w-full text-left text-[11px]"><tbody id="dash-progress"  class="divide-y divide-slate-800"></tbody></table></div></div>
+            <div class="bg-slate-900 rounded-[40px] border border-slate-800 overflow-hidden shadow-2xl"><div class="p-6 border-b border-slate-800 font-black text-green-500 italic uppercase text-sm"><i class="fas fa-check-circle mr-2"></i> Completed (${cCo})</div><div class="overflow-x-auto"><table class="w-full text-left text-[11px]"><tbody id="dash-completed" class="divide-y divide-slate-800"></tbody></table></div></div>
+        </div>`;
+        renderFinancialChart();
+        db.jobs.filter(j => j.name.toLowerCase().includes(t)||j.rego.toLowerCase().includes(t))
+            .sort((a,b) => new Date(b.date)-new Date(a.date)).forEach(j => {
+                const row = `<tr class="clickable-row hover:bg-slate-800" onclick="openManage('${j.jobNo}')"><td class="p-4 font-mono text-slate-500 text-[10px]">${j.jobNo}</td><td class="p-4 font-black text-white uppercase">${j.rego}</td><td class="p-4 text-right italic text-slate-500 text-[9px]">${j.date}</td></tr>`;
+                if (j.status==='Unstarted'  && document.getElementById('dash-unstarted').children.length<10) document.getElementById('dash-unstarted').innerHTML+=row;
+                if (j.status==='In Progress'&& document.getElementById('dash-progress').children.length<10)  document.getElementById('dash-progress').innerHTML+=row;
+                if (j.status==='Completed'  && document.getElementById('dash-completed').children.length<10) document.getElementById('dash-completed').innerHTML+=row;
+            });
+    }
+
+    // ── JOBS (now rendered inside Booking Management) ──────────────────────────
+    // Jobs Registry is integrated into rescheduled view — no separate render needed here
+
+    // ── CUSTOMERS ────────────────────────────────────────────────────────────
+    if (activeView === 'customers') {
+        // Merge db.customers (persisted) with job-derived custs (for vehicle linkage)
+        const allCusts = {};
+        Object.values(db.customers).forEach(c => { allCusts[c.name] = { name:c.name, phone:c.phone||'', email:c.email||'', cars:[] }; });
+        Object.values(custs).forEach(c => {
+            if (!allCusts[c.name]) allCusts[c.name] = { name:c.name, phone:c.phone||'', email:c.email||'', cars:c.cars };
+            else { allCusts[c.name].cars = c.cars; if (c.phone) allCusts[c.name].phone = c.phone; if (c.email) allCusts[c.name].email = c.email; }
+        });
+        document.getElementById('view-customers').innerHTML = `
+        <div class="flex justify-between items-center mb-6"><h2 class="text-2xl font-black text-white italic uppercase tracking-tighter">Customer Vault</h2><span class="text-xs font-black text-slate-500 uppercase">${Object.keys(allCusts).length} Customers</span></div>
+        <div class="bg-slate-900 rounded-[40px] border border-slate-800 overflow-hidden shadow-2xl">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs"><thead class="bg-slate-950 uppercase font-black text-slate-500"><tr><th class="p-6">Name</th><th class="p-6">Phone</th><th class="p-6">Email</th><th class="p-6">Vehicles</th><th class="p-6 text-right">Jobs</th></tr></thead><tbody id="cust-body" class="divide-y divide-slate-800"></tbody></table>
+            </div>
+        </div>`;
+        const cb = document.getElementById('cust-body');
+        Object.values(allCusts).filter(c=>c.name.toLowerCase().includes(t)||(c.phone||'').toLowerCase().includes(t)).forEach(c => {
+            const jc = db.jobs.filter(j=>j.name===c.name).length;
+            const vegBadges = (c.cars||[]).map(r =>
+                `<span onclick="event.stopPropagation();openVehicleProfile('${r}')" class="inline-block bg-orange-950 border border-orange-700 text-orange-400 font-black uppercase text-[9px] px-2 py-0.5 rounded-lg cursor-pointer hover:bg-orange-800 hover:text-white transition-all mr-1 mb-1">${r}</span>`
+            ).join('');
+            cb.innerHTML += `<tr class="clickable-row hover:bg-slate-800" onclick="openCustomerProfile('${c.name.replace(/'/g,"\\'")}')"><td class="p-6 font-black text-white italic uppercase">${c.name}</td><td class="p-6 font-mono text-slate-400">${c.phone||'—'}</td><td class="p-6 text-blue-400 italic">${c.email||'—'}</td><td class="p-6">${vegBadges}</td><td class="p-6 text-right font-black text-blue-400">${jc}</td></tr>`;
+        });
+    }
+
+    // ── VEHICLES ─────────────────────────────────────────────────────────────
+    if (activeView === 'vehicles') {
+        const vehs = Object.entries(db.vehicles).filter(([r,v])=>r.toLowerCase().includes(t)||(v.owner||'').toLowerCase().includes(t)||(v.make||'').toLowerCase().includes(t));
+        document.getElementById('view-vehicles').innerHTML = `
+        <div class="flex justify-between items-center mb-6"><h2 class="text-2xl font-black text-white italic uppercase tracking-tighter">Vehicle Fleet</h2><span class="text-xs font-black text-slate-500 uppercase">${Object.keys(db.vehicles).length} Vehicles</span></div>
+        <div class="bg-slate-900 rounded-[40px] border border-slate-800 overflow-hidden shadow-2xl">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs"><thead class="bg-slate-950 uppercase font-black text-slate-500"><tr><th class="p-6">Plate</th><th class="p-6">Make / Model</th><th class="p-6">Capacity</th><th class="p-6">Owner</th><th class="p-6 text-right">Jobs</th></tr></thead><tbody id="veh-body" class="divide-y divide-slate-800"></tbody></table>
+            </div>
+        </div>`;
+        const vb = document.getElementById('veh-body');
+        if (!vehs.length) { vb.innerHTML=`<tr><td colspan="5" class="p-10 text-center text-slate-600 italic font-bold">No vehicles.</td></tr>`; }
+        else vehs.forEach(([r,v]) => {
+            const jc = db.jobs.filter(j=>j.rego===r).length;
+            vb.innerHTML += `<tr class="clickable-row hover:bg-slate-800" onclick="openVehicleProfile('${r}')"><td class="p-6 font-black text-orange-500 uppercase">${r}</td><td class="p-6 font-bold text-white">${v.make||'—'} ${v.model||''}</td><td class="p-6 text-slate-400">${v.capacity||'—'}</td><td class="p-6 text-slate-300">${v.owner||'—'}</td><td class="p-6 text-right font-black text-blue-400">${jc}</td></tr>`;
+        });
+    }
+
+    // ── CALENDAR / BOOKING MGMT ──────────────────────────────────────────────
+    if (activeView === 'rescheduled') {
+        renderBookingManagement();
+    }
+
+    // ── FEES ─────────────────────────────────────────────────────────────────
+    if (activeView === 'fees') {
+        document.getElementById('view-fees').innerHTML = `
+        <div class="flex justify-between items-center mb-6"><h2 class="text-2xl font-black text-white italic uppercase tracking-tighter">Service Fee Schedule</h2><button onclick="openFeeModal()" class="bg-yellow-600 text-white font-black px-8 py-4 rounded-3xl shadow-xl uppercase text-xs">+ Add Fee</button></div>
+        <div class="bg-slate-900 rounded-[40px] border border-slate-800 overflow-hidden shadow-2xl">
+            <table class="w-full text-left text-xs"><thead class="bg-slate-950 uppercase font-black text-slate-500"><tr><th class="p-6">Service</th><th class="p-6 text-right">Price</th><th class="p-6 text-right">Action</th></tr></thead><tbody id="fee-body" class="divide-y divide-slate-800"></tbody></table>
+        </div>`;
+        const fb=document.getElementById('fee-body');
+        if (!db.serviceFees.filter(f=>(f.service||'').toLowerCase().includes(t)).length) { fb.innerHTML=`<tr><td colspan="3" class="p-10 text-center text-slate-600 italic">No fees defined.</td></tr>`; }
+        else db.serviceFees.forEach((f,i)=>{ if(!(f.service||'').toLowerCase().includes(t))return; fb.innerHTML+=`<tr class="clickable-row hover:bg-slate-800"><td class="p-6 font-bold text-white">${f.service}</td><td class="p-6 text-right font-black text-green-500">$${parseFloat(f.price).toFixed(2)}</td><td class="p-6 text-right"><button onclick="openEditFeeModal(${i})" class="bg-slate-800 text-slate-300 px-4 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-slate-700">Edit</button></td></tr>`; });
+    }
+
+    // ── INVESTMENT ───────────────────────────────────────────────────────────
+    if (activeView === 'stocks') {
+        const tt   = db.stock.filter(s=>s.type==='Tools').reduce((s,x)=>s+x.qty*x.price,0);
+        const ta   = db.stock.filter(s=>s.type==='Accessories').reduce((s,x)=>s+x.qty*x.price,0);
+        const gran = tt + ta;
+        // Budget auto-sourced from Budget & Profit: 25% of total gross
+        const budg = (tMarkup + tLab) * 0.25;
+        const rem  = Math.max(0, budg - gran);
+        const overspent = gran > budg;
+        const pct  = budg > 0 ? Math.min(100, (gran/budg)*100) : 0;
+        const barColor = pct>=100?'#ef4444':pct>=75?'#f97316':'#3b82f6';
+        const tb2cls = (tab) => `flex-1 py-3 rounded-2xl text-[10px] font-black uppercase ${assetTab===tab?'bg-blue-600 text-white':'bg-slate-950 text-slate-500'}`;
+        document.getElementById('view-stocks').innerHTML = `
+        <!-- Budget Banner -->
+        <div class="bg-slate-900 rounded-[40px] border border-blue-800/50 p-7 mb-6">
+            <div class="flex items-center justify-between mb-5">
+                <div>
+                    <p class="text-[9px] font-black text-blue-400 uppercase tracking-widest">Workshop Investment Budget</p>
+                    <p class="text-slate-500 text-[10px] italic mt-0.5">Auto-assigned from Budget &amp; Profit &mdash; 25% of gross earnings</p>
+                </div>
+                <button onclick="showView('budget')" class="flex items-center gap-2 bg-blue-950/60 border border-blue-700 text-blue-400 hover:bg-blue-800 hover:text-white px-5 py-2.5 rounded-2xl text-[10px] font-black uppercase transition-all">
+                    <i class="fas fa-chart-line text-xs"></i> Budget &amp; Profit
+                </button>
+            </div>
+            <div class="w-full bg-slate-800 rounded-full h-2.5 mb-4 overflow-hidden">
+                <div class="h-2.5 rounded-full transition-all duration-700" style="width:${pct.toFixed(1)}%;background:${barColor}"></div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-center">
+                <div class="bg-slate-950 rounded-2xl p-4 border border-blue-800/60">
+                    <p class="text-[9px] font-black text-blue-400 uppercase">Invest Budget</p>
+                    <p class="text-white font-black text-xl mt-1">$${budg.toFixed(2)}</p>
+                    <p class="text-[8px] text-slate-600 italic mt-0.5">25% of gross</p>
+                </div>
+                <div class="bg-slate-950 rounded-2xl p-4 border border-blue-900/40"><p class="text-[9px] font-black text-blue-400 uppercase">Tools</p><p class="text-white font-black text-xl mt-1">$${tt.toFixed(2)}</p></div>
+                <div class="bg-slate-950 rounded-2xl p-4 border border-orange-900/40"><p class="text-[9px] font-black text-orange-400 uppercase">Accessories</p><p class="text-white font-black text-xl mt-1">$${ta.toFixed(2)}</p></div>
+                <div class="bg-slate-950 rounded-2xl p-4 border ${overspent?'border-red-800/50':'border-green-900/40'}">
+                    <p class="text-[9px] font-black ${overspent?'text-red-400':'text-green-400'} uppercase">${overspent?'Overspent':'Remaining'}</p>
+                    <p class="${overspent?'text-red-400':'text-green-400'} font-black text-xl mt-1">$${overspent?(gran-budg).toFixed(2):rem.toFixed(2)}</p>
+                </div>
+            </div>
+        </div>
+        <!-- Grand Total -->
+        <div class="bg-slate-950 rounded-3xl border-2 border-blue-700/60 p-5 text-center mb-6">
+            <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total Workshop Investment Spent</p>
+            <p class="text-5xl font-black text-white mt-1">$${gran.toFixed(2)}</p>
+            <p class="text-[9px] text-slate-500 italic mt-2">${db.stock.length} item${db.stock.length!==1?'s':''} &mdash; Tools $${tt.toFixed(2)} + Accessories $${ta.toFixed(2)}</p>
+        </div>
+        <!-- Tab -->
+        <div class="bg-slate-900 p-4 rounded-[32px] border border-slate-800 flex gap-2">
+            <button onclick="setAssetTab('Tools')" class="${tb2cls('Tools')}">🔧 Tools ($${tt.toFixed(2)})</button>
+            <button onclick="setAssetTab('Accessories')" class="${tb2cls('Accessories')}">🔩 Accessories ($${ta.toFixed(2)})</button>
+        </div>
+        <div class="bg-slate-900 rounded-[40px] border border-slate-800 overflow-hidden mt-6">
+            <table class="w-full text-left text-xs"><thead class="bg-slate-950 uppercase font-black text-slate-500"><tr><th class="p-6">Date</th><th class="p-6">Item</th><th class="p-6 text-center">Qty</th><th class="p-6 text-right">Unit $</th><th class="p-6 text-right">Total</th></tr></thead><tbody id="asset-body" class="divide-y divide-slate-800"></tbody></table>
+        </div>
+        <div class="flex justify-center pt-8"><button onclick="openStockModal()" class="bg-blue-600 text-white font-black px-12 py-5 rounded-3xl shadow-xl uppercase">+ Add New ${assetTab}</button></div>`;
+        const ab=document.getElementById('asset-body');
+        const sf=db.stock.filter(s=>s.type===assetTab&&(s.item||'').toLowerCase().includes(t));
+        if (!sf.length) { ab.innerHTML=`<tr><td colspan="5" class="p-10 text-center text-slate-600 italic">No ${assetTab.toLowerCase()} logged.</td></tr>`; }
+        else db.stock.forEach((s,idx)=>{ if(s.type!==assetTab||!(s.item||'').toLowerCase().includes(t))return; ab.innerHTML+=`<tr class="clickable-row hover:bg-slate-800" onclick="openManageStock(${idx})"><td class="p-6 text-slate-400 italic text-[10px]">${s.date}</td><td class="p-6 font-bold text-white uppercase">${s.item}</td><td class="p-6 text-center font-black text-blue-400">${s.qty}</td><td class="p-6 text-right text-slate-400">$${parseFloat(s.price).toFixed(2)}</td><td class="p-6 text-right font-black text-white">$${(s.qty*s.price).toFixed(2)}</td></tr>`; });
+    }
+
+    // ── GENERAL INFO & WEB LINKS ───────────────────────────────────────────────
+    if (activeView === 'geninfo') {
+        const foldersHtml = db.folders.map(f => {
+            const hasDocs = f.documents && f.documents.length > 0;
+            const hasNotes = f.notes && f.notes.trim().length > 0;
+            return `
+            <div class="bg-slate-900 border border-slate-800 rounded-[30px] p-6 hover:border-blue-500 hover:-translate-y-1 transition-all cursor-pointer group" onclick="openFolderModal('${f.id}')">
+                <div class="flex justify-between items-start mb-4">
+                    <div class="bg-blue-900/30 text-blue-400 w-12 h-12 rounded-2xl flex items-center justify-center text-xl group-hover:scale-110 transition-transform">
+                        <i class="fas fa-folder"></i>
+                    </div>
+                    <button class="text-slate-600 hover:text-red-500 transition-colors" onclick="event.stopPropagation(); deleteFolder('${f.id}')">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+                <h3 class="text-white font-black text-lg mb-2">${f.name}</h3>
+                <div class="flex gap-3 text-[9px] font-black uppercase text-slate-500">
+                    ${hasNotes ? '<span class="text-yellow-400"><i class="fas fa-sticky-note mr-1"></i>Notes</span>' : ''}
+                    ${hasDocs ? '<span class="text-purple-400"><i class="fas fa-file-image mr-1"></i>Docs</span>' : ''}
+                    ${!hasNotes && !hasDocs ? '<span>Empty Folder</span>' : ''}
+                </div>
+            </div>`;
+        }).join('');
+
+        let permanentLinksHtml = db.webLinks.length ? db.webLinks.map((l, idx) => `
+        <tr class="group">
+            <td class="py-3 px-4 w-1/4"><input type="text" placeholder="Site Name" value="${l.site||''}" onchange="updatePermLink(${idx}, 'site', this.value)" class="w-full bg-slate-950 border border-slate-800 p-3 text-xs font-black text-sky-400 uppercase rounded-xl outline-none"></td>
+            <td class="py-3 px-4 w-1/4"><input type="text" placeholder="URL" value="${l.url||''}" onchange="updatePermLink(${idx}, 'url', this.value)" class="w-full bg-slate-950 border border-slate-800 p-3 text-xs text-blue-400 italic rounded-xl outline-none"></td>
+            <td class="py-3 px-4 w-1/4"><input type="text" placeholder="Username" value="${l.user||''}" onchange="updatePermLink(${idx}, 'user', this.value)" class="w-full bg-slate-950 border border-slate-800 p-3 text-xs text-slate-300 rounded-xl outline-none"></td>
+            <td class="py-3 px-4 w-1/4 relative">
+                <input type="password" placeholder="Password" value="${l.pass||''}" onchange="updatePermLink(${idx}, 'pass', this.value)" class="w-full bg-slate-950 border border-slate-800 p-3 text-xs text-slate-400 font-mono rounded-xl outline-none pr-10" onfocus="this.type='text'" onblur="this.type='password'">
+                <button type="button" onclick="deletePermLink(${idx})" class="absolute right-6 top-1/2 -translate-y-1/2 text-red-700 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all font-black">&times;</button>
+            </td>
+        </tr>`).join('') : `<tr><td colspan="4" class="p-8 text-center text-slate-600 italic">No web links saved. Click + Add Link above.</td></tr>`;
+
+        document.getElementById('view-geninfo').innerHTML = `
+        <!-- Permanent Web Links Vault -->
+        <div class="bg-slate-900 rounded-[40px] border border-sky-900/40 p-8 mb-8 shadow-2xl">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h3 class="text-xl font-black uppercase text-white italic tracking-tighter"><i class="fas fa-link text-sky-500 mr-2"></i> Permanent Web Links</h3>
+                    <p class="text-[10px] text-slate-500 font-bold uppercase mt-1">Global Vault &mdash; Always visible</p>
+                </div>
+                <button onclick="addPermLink()" class="bg-sky-600 text-white font-black px-6 py-3 rounded-2xl shadow-xl uppercase text-[10px] hover:bg-sky-500 transition-all">
+                    <i class="fas fa-plus mr-2"></i> Add Link
+                </button>
+            </div>
+            <div class="bg-slate-950 rounded-3xl border border-slate-800 overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead class="bg-slate-900 uppercase font-black text-slate-500 text-[9px] tracking-widest border-b border-slate-800">
+                        <tr><th class="p-4">Site Name</th><th class="p-4">URL</th><th class="p-4">Username</th><th class="p-4">Password</th></tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-800/50">${permanentLinksHtml}</tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="flex items-center justify-between mb-6">
+            <h3 class="text-xl font-black uppercase text-slate-400 italic tracking-tighter"><i class="fas fa-folder text-slate-500 mr-2"></i> Subfolders</h3>
+            <button onclick="createNewFolder()" class="bg-blue-600 text-white font-black px-6 py-3 rounded-2xl shadow-xl uppercase text-[10px] hover:bg-blue-500 transition-all">
+                <i class="fas fa-plus mr-2"></i> New Folder
+            </button>
+        </div>
+        ${db.folders.length ? `<div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6" id="folder-grid">${foldersHtml}</div>` 
+                            : `<div class="bg-slate-900 rounded-[40px] border border-slate-800 p-16 text-center"><i class="fas fa-folder-open text-6xl text-slate-700 mb-6 block"></i><p class="text-slate-500 italic text-sm">No custom folders created yet.</p></div>`}
+        `;
+    }
+
+    // ── BUDGET & PROFIT ──────────────────────────────────────────────────────
+    if (activeView === 'budget') {
+        const today = new Date();
+        const y = today.getFullYear(), m = today.getMonth(), d = today.getDate(), dayOfWeek = today.getDay();
+        const startOfWeek = new Date(y, m, d - dayOfWeek);
+        const startOfMonth = new Date(y, m, 1);
+        const startOfYear = new Date(y, 0, 1);
+
+        const budgetJobs = db.jobs.filter(j => {
+            if (j.status !== 'Completed') return false;
+            const jd = new Date(j.date);
+            if (budgetFilter === 'day')   return jd.toDateString() === today.toDateString();
+            if (budgetFilter === 'week')  return jd >= startOfWeek;
+            if (budgetFilter === 'month') return jd >= startOfMonth;
+            if (budgetFilter === 'year')  return jd >= startOfYear;
+            return true; // lifetime
+        });
+
+        const periodLab = budgetJobs.reduce((s,j)=>s+parseFloat(j.labour||0), 0);
+        const periodMarkup = budgetJobs.reduce((s,j)=>s+( (j.parts||[]).reduce((ps,p)=>ps+(p.qty*p.sellPrice - p.qty*p.cost),0) ), 0);
+        const periodGross = periodLab + periodMarkup;
+
+        // Lifetime calculations to ensure correct Emergency capping
+        const totalGrossLifetime = tMarkup + tLab;
+        const lifetimeEmerFunded = Math.min(4000, totalGrossLifetime * 0.50);
+        const isEmerCapped = lifetimeEmerFunded >= 4000;
+        
+        // Distribution of THIS period's gross (Emergency takes priority unless capped already)
+        let emer = 0, sav = 0;
+        if (isEmerCapped) {
+            sav = periodGross * 0.50; // straight to savings
+        } else {
+            // Still funding emergency. Calculate how much room is left.
+            const roomLeft = 4000 - (totalGrossLifetime - periodGross) * 0.50; 
+            emer = Math.min(roomLeft, periodGross * 0.50);
+            sav = Math.max(0, (periodGross * 0.50) - emer);
+        }
+
+        const bfCls = (f) => `px-6 py-2 rounded-2xl text-[10px] uppercase font-black transition-all ${budgetFilter===f ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-900 border border-slate-700 text-slate-500 hover:text-white'}`;
+
+        document.getElementById('view-budget').innerHTML = `
+        <div class="flex justify-center gap-3 mb-8">
+            <button onclick="setBudgetFilter('day')" class="${bfCls('day')}">Today</button>
+            <button onclick="setBudgetFilter('week')" class="${bfCls('week')}">This Week</button>
+            <button onclick="setBudgetFilter('month')" class="${bfCls('month')}">This Month</button>
+            <button onclick="setBudgetFilter('year')" class="${bfCls('year')}">This Year</button>
+            <button onclick="setBudgetFilter('lifetime')" class="${bfCls('lifetime')}">Lifetime</button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div class="bg-slate-900 p-8 rounded-[40px] border-b-4 border-red-500 text-center"><p class="text-[9px] uppercase font-black text-slate-400">Emergency</p><h3 class="text-3xl font-black text-white italic mt-2">$${emer.toFixed(2)}</h3></div>
+            <div class="bg-slate-900 p-8 rounded-[40px] border-b-4 border-blue-500 text-center"><p class="text-[9px] uppercase font-black text-slate-400">Savings</p><h3 class="text-3xl font-black text-white italic mt-2">$${sav.toFixed(2)}</h3></div>
+            <div onclick="showView('stocks')" class="bg-slate-900 p-8 rounded-[40px] border-b-4 border-blue-400 text-center cursor-pointer hover:bg-slate-800 transition-colors"><p class="text-[9px] uppercase font-black text-slate-400">Invest (Click to View)</p><h3 class="text-3xl font-black text-white italic mt-2">$${(periodGross*0.25).toFixed(2)}</h3></div>
+            <div class="bg-slate-900 p-8 rounded-[40px] border-b-4 border-green-500 text-center"><p class="text-[9px] uppercase font-black text-slate-400">Profit (Keep)</p><h3 class="text-3xl font-black text-green-500 italic mt-2">$${(periodGross*0.25).toFixed(2)}</h3></div>
+        </div>
+        
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+            <div class="col-span-2 bg-slate-950 p-8 rounded-[40px] border border-slate-800 relative h-80 flex flex-col">
+                <h4 class="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4 text-center">Earnings Trend (${budgetFilter})</h4>
+                <div class="flex-1 w-full relative"><canvas id="budgetPeriodChart"></canvas></div>
+            </div>
+            
+            <div class="bg-slate-950 p-8 rounded-[40px] border border-slate-800 flex flex-col justify-center text-center shadow-2xl relative overflow-hidden group">
+                <div class="absolute inset-0 bg-green-900/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                <p class="text-green-500 text-[10px] font-black uppercase italic tracking-widest relative z-10">Period Gross Profit</p>
+                <h4 class="text-6xl font-black text-white italic tracking-tighter mt-4 relative z-10">$${periodGross.toLocaleString('en-AU',{minimumFractionDigits:2})}</h4>
+                <p class="text-slate-600 text-[9px] mt-4 uppercase font-black italic relative z-10">From ${budgetJobs.length} completed jobs</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 mt-6">
+            <div onclick="openFinancialBreakdown('labour')" class="bg-slate-900 overflow-hidden rounded-[30px] border border-slate-800 text-center cursor-pointer hover:border-blue-500 hover:-translate-y-1 transition-all group">
+                <div class="p-8">
+                    <p class="text-[9px] font-black text-slate-500 uppercase">Labour Revenue</p>
+                    <h4 class="text-2xl font-black text-white mt-1 group-hover:text-blue-400 transition-colors">$${periodLab.toFixed(2)}</h4>
+                </div>
+                <div class="bg-slate-950 p-3 text-[8px] font-black uppercase tracking-widest text-blue-500/50 group-hover:text-blue-400 transition-colors border-t border-slate-800/50">Click to Breakdown</div>
+            </div>
+            <div onclick="openFinancialBreakdown('markup')" class="bg-slate-900 overflow-hidden rounded-[30px] border border-slate-800 text-center cursor-pointer hover:border-blue-500 hover:-translate-y-1 transition-all group">
+                <div class="p-8">
+                    <p class="text-[9px] font-black text-slate-500 uppercase">Parts Markup</p>
+                    <h4 class="text-2xl font-black text-white mt-1 group-hover:text-blue-400 transition-colors">$${periodMarkup.toFixed(2)}</h4>
+                </div>
+                <div class="bg-slate-950 p-3 text-[8px] font-black uppercase tracking-widest text-blue-500/50 group-hover:text-blue-400 transition-colors border-t border-slate-800/50">Click to Breakdown</div>
+            </div>
+            <div onclick="openFinancialBreakdown('jobs')" class="bg-slate-900 overflow-hidden rounded-[30px] border border-slate-800 text-center cursor-pointer hover:border-blue-500 hover:-translate-y-1 transition-all group">
+                <div class="p-8">
+                    <p class="text-[9px] font-black text-slate-500 uppercase">Total Completed Jobs</p>
+                    <h4 class="text-2xl font-black text-white mt-1 group-hover:text-blue-400 transition-colors">${budgetJobs.length}</h4>
+                </div>
+                <div class="bg-slate-950 p-3 text-[8px] font-black uppercase tracking-widest text-blue-500/50 group-hover:text-blue-400 transition-colors border-t border-slate-800/50">Click to Breakdown</div>
+            </div>
+        </div>`;
+        renderBudgetPeriodChart(budgetJobs);
+    }
+}
+
+// ─── CHART ───────────────────────────────────────────────────────────────────
+function renderFinancialChart() {
+    const ctx = document.getElementById('financialChart'); if (!ctx) return;
+    const data = Array(12).fill(0);
+    db.jobs.forEach(j => { if(j.status==='Completed') data[new Date(j.date).getMonth()] += parseFloat(j.labour||0); });
+    if (myChart) myChart.destroy();
+    myChart = new Chart(ctx.getContext('2d'), { type:'line', data:{ labels:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], datasets:[{ label:'Gross Revenue', data, borderColor:'#10b981', fill:true, backgroundColor:'rgba(16,185,129,0.07)', tension:0.4, pointBackgroundColor:'#10b981' }] }, options:{ maintainAspectRatio:false, plugins:{ legend:{ labels:{ color:'#94a3b8', font:{ weight:'bold' } } } }, scales:{ y:{ grid:{ color:'#1e293b' }, ticks:{ color:'#94a3b8', callback:v=>'$'+v } }, x:{ grid:{ color:'#1e293b' }, ticks:{ color:'#94a3b8' } } } } });
+}
+
+// ─── JOB STATUS PILLS ────────────────────────────────────────────────────────
+function setJobStatus(status) {
+    document.getElementById('m-job-status').value = status;
+    const map = { 'Unstarted':'unstarted-active', 'In Progress':'progress-active', 'Completed':'completed-active', 'Cancelled':'cancelled-active' };
+    ['Unstarted','In Progress','Completed','Cancelled'].forEach(s => {
+        const pill = document.getElementById('pill-' + s);
+        if(pill) pill.className = 'status-pill ' + (s === status ? map[s] : 'inactive');
+    });
+
+    const invBtn = document.getElementById('btn-invoice');
+    if (invBtn) {
+        if (status === 'Completed') invBtn.classList.remove('hidden');
+        else invBtn.classList.add('hidden');
+    }
+}
+
+// ─── PARTS TABLE ─────────────────────────────────────────────────────────────
+function addPartRow(p = null) {
+    const tbody = document.getElementById('parts-tbody');
+    const tr = document.createElement('tr');
+    const desc      = p ? p.desc      : '';
+    const qty       = p ? p.qty       : 1;
+    const cost      = p ? p.cost      : '';
+    const markup    = p ? p.markup    : 0;
+    const sellPrice = p ? p.sellPrice : '';
+    tr.innerHTML = `
+        <td class="pr-2 py-1"><input type="text"   value="${desc}"   placeholder="Part description" class="parts-input" oninput="calcGrandTotal()"></td>
+        <td class="pr-2 py-1"><input type="number" value="${qty}"    min="1" step="1"   class="parts-input" style="width:60px" oninput="calcPartRow(this)"></td>
+        <td class="pr-2 py-1"><input type="number" value="${cost}"   min="0" step="0.01" placeholder="0.00" class="parts-input cost-in" style="width:90px" oninput="calcPartRow(this)"></td>
+        <td class="pr-2 py-1"><input type="number" value="${markup}" min="0" step="1"   placeholder="0"    class="parts-input markup-in" style="width:80px" oninput="calcPartRow(this)"></td>
+        <td class="pr-2 py-1"><input type="number" value="${sellPrice}" min="0" step="0.01" placeholder="0.00" class="parts-input sell-in"  style="width:100px" oninput="calcGrandTotal()"></td>
+        <td class="pr-2 py-1"><input type="text"   readonly class="parts-input readonly line-total" style="width:100px" value="$0.00"></td>
+        <td class="py-1"><button type="button" onclick="this.closest('tr').remove(); calcGrandTotal();" class="bg-red-950 border border-red-800 text-red-400 hover:bg-red-900 w-8 h-8 rounded-lg text-xs font-black transition-all">×</button></td>`;
+    tbody.appendChild(tr);
+    if (p) calcPartRow(tr.querySelector('.cost-in'));
+    calcGrandTotal();
+}
+
+function calcPartRow(input) {
+    const row      = input.closest('tr');
+    const cost     = parseFloat(row.querySelector('.cost-in').value)   || 0;
+    const markup   = parseFloat(row.querySelector('.markup-in').value) || 0;
+    const sellIn   = row.querySelector('.sell-in');
+    const lineEl   = row.querySelector('.line-total');
+    const qty      = parseFloat(row.cells[1].querySelector('input').value) || 0;
+    const sellPrice = cost * (1 + markup / 100);
+    sellIn.value   = sellPrice.toFixed(2);
+    lineEl.value   = '$' + (qty * sellPrice).toFixed(2);
+    calcGrandTotal();
+}
+
+function calcGrandTotal() {
+    let partsTotal = 0;
+    document.querySelectorAll('#parts-tbody tr').forEach(row => {
+        const qty  = parseFloat(row.cells[1].querySelector('input').value)  || 0;
+        const sell = parseFloat(row.querySelector('.sell-in').value)        || 0;
+        partsTotal += qty * sell;
+    });
+    const labour = parseFloat(document.getElementById('m-labour').value || 0);
+    const grand  = partsTotal + labour;
+    document.getElementById('parts-subtotal').textContent = '$' + partsTotal.toFixed(2);
+    if (document.getElementById('gt-parts'))  document.getElementById('gt-parts').textContent  = '$' + partsTotal.toFixed(2);
+    if (document.getElementById('gt-labour')) document.getElementById('gt-labour').textContent = '$' + labour.toFixed(2);
+    if (document.getElementById('gt-total'))  document.getElementById('gt-total').textContent  = '$' + grand.toFixed(2);
+}
+
+function applyServiceFee(val) {
+    if (!val) return;
+    document.getElementById('m-labour').value = parseFloat(val).toFixed(2);
+    calcGrandTotal();
+}
+
+function buildFeeSelect() {
+    const sel = document.getElementById('m-fee-select');
+    sel.innerHTML = '<option value="">— Select Fee —</option>';
+    db.serviceFees.forEach(f => { const o = document.createElement('option'); o.value = f.price; o.textContent = `${f.service} — $${parseFloat(f.price).toFixed(2)}`; sel.appendChild(o); });
+}
+
+// ─── OPEN MANAGE MODAL ───────────────────────────────────────────────────────
+function openManage(id) {
+    const j = db.jobs.find(x => x.jobNo === id); if (!j) return;
+    if (!db.vehicles[j.rego]) db.vehicles[j.rego] = { owner:j.name, make:'', model:'', year:'', capacity:'', info:[] };
+    const v = db.vehicles[j.rego];
+
+    document.getElementById('m-job-id').value      = id;
+    document.getElementById('m-job-display').innerText = id + ' — ' + j.rego + ' — ' + j.date;
+    document.getElementById('m-rego-display').innerText = j.rego;
+    document.getElementById('m-cust-name').value   = j.name;
+    document.getElementById('m-cust-phone').value  = j.phone  || '';
+    document.getElementById('m-cust-email').value  = j.email  || '';
+    document.getElementById('m-make').value        = v.make   || '';
+    document.getElementById('m-model').value       = v.model  || '';
+    document.getElementById('m-capacity').value    = v.capacity|| '';
+    document.getElementById('m-labour').value      = j.labour || 0;
+    document.getElementById('m-report').value      = j.report || '';
+    document.getElementById('m-km').value          = j.km || '';
+    document.getElementById('m-km-interval').value = j.kmInterval || '10000';
+    document.getElementById('m-vinfo-new').value   = '';
+    
+    calcKmTotal();
+
+    setJobStatus(j.status || 'Unstarted');
+    buildFeeSelect();
+
+    // Render existing parts
+    document.getElementById('parts-tbody').innerHTML = '';
+    (j.parts || []).forEach(p => addPartRow(p));
+    calcGrandTotal();
+
+    // Render existing photos
+    renderPhotoGrid(j.photos || []);
+
+    renderVehicleHistorySmall(v);
+    document.getElementById('manageModal').classList.add('active');
+}
+
+// ─── SAVE JOB ────────────────────────────────────────────────────────────────
+function updateJob(e) {
+    e.preventDefault();
+    const id = document.getElementById('m-job-id').value;
+    const j  = db.jobs.find(x => x.jobNo === id); if (!j) return;
+    const v  = db.vehicles[j.rego];
+
+    j.name   = document.getElementById('m-cust-name').value;
+    j.phone  = document.getElementById('m-cust-phone').value;
+    j.email  = document.getElementById('m-cust-email').value;
+    j.status = document.getElementById('m-job-status').value;
+    j.labour = parseFloat(document.getElementById('m-labour').value || 0);
+    j.report = document.getElementById('m-report').value;
+    j.km = document.getElementById('m-km').value;
+    j.kmInterval = document.getElementById('m-km-interval').value;
+    v.make     = document.getElementById('m-make').value;
+    v.model    = document.getElementById('m-model').value;
+    v.capacity = document.getElementById('m-capacity').value;
+    v.owner    = j.name;
+    // Persist customer record independently of jobs
+    if (j.name) db.customers[j.name] = { name: j.name, phone: j.phone||'', email: j.email||'' };
+
+    // Collect parts
+    j.parts = [];
+    document.querySelectorAll('#parts-tbody tr').forEach(row => {
+        const desc  = row.cells[0].querySelector('input').value.trim();
+        if (!desc) return;
+        const qty   = parseFloat(row.cells[1].querySelector('input').value) || 0;
+        const cost  = parseFloat(row.querySelector('.cost-in').value)       || 0;
+        const markup= parseFloat(row.querySelector('.markup-in').value)     || 0;
+        const sell  = parseFloat(row.querySelector('.sell-in').value)       || cost;
+        j.parts.push({ desc, qty, cost, markup, sellPrice: sell });
+    });
+
+    // Save photos
+    j.photos = [..._jobPhotos];
+
+    sync(); closeModal(); renderData();
+}
+
+// ─── INVESTMENT BUDGET ─────────────────────────────────────────────────────
+function saveInvestBudget(val) {
+    db.investmentBudget = parseFloat(val) || 0;
+    sync();
+    renderData();
+}
+
+function calcKmTotal() {
+    const kmVal = parseFloat(document.getElementById('m-km').value);
+    const intervalVal = parseFloat(document.getElementById('m-km-interval').value);
+    const resultEl = document.getElementById('m-km-result');
+    if (isNaN(kmVal)) {
+        resultEl.innerText = '—';
+    } else {
+        resultEl.innerText = (kmVal + intervalVal).toLocaleString() + ' Km';
+    }
+}
+
+// ─── PHOTO EVIDENCE ─────────────────────────────────────────────────────────────
+let _jobPhotos = []; // working array — saved when job is saved
+
+function renderPhotoGrid(photos) {
+    _jobPhotos = photos ? [...photos] : [];
+    const grid  = document.getElementById('photo-grid');
+    const empty = document.getElementById('photo-empty');
+    if (!grid) return;
+    grid.innerHTML = '';
+    if (!_jobPhotos.length) { empty.style.display='block'; return; }
+    empty.style.display = 'none';
+    _jobPhotos.forEach((src, idx) => {
+        const div = document.createElement('div');
+        div.className = 'relative group rounded-xl overflow-hidden border border-slate-700 cursor-pointer';
+        div.style.aspectRatio = '1';
+        div.innerHTML = `
+            <img src="${src}" class="w-full h-full object-cover" onclick="viewJobPhoto(${idx})">
+            <button type="button" onclick="removeJobPhoto(${idx})"
+                class="absolute top-1 right-1 bg-red-900/80 hover:bg-red-600 text-white w-6 h-6 rounded-full text-xs font-black opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center">
+                &times;
+            </button>`;
+        grid.appendChild(div);
+    });
+}
+
+function addJobPhotos(input) {
+    const files = Array.from(input.files);
+    if (!files.length) return;
+    let loaded = 0;
+    files.forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            // Compress via canvas to max 1200px and 0.82 quality
+            const img = new Image();
+            img.onload = () => {
+                const MAX = 1200;
+                let w = img.width, h = img.height;
+                if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+                else if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
+                const cv = document.createElement('canvas');
+                cv.width = w; cv.height = h;
+                cv.getContext('2d').drawImage(img, 0, 0, w, h);
+                _jobPhotos.push(cv.toDataURL('image/jpeg', 0.82));
+                loaded++;
+                if (loaded === files.length) renderPhotoGrid(_jobPhotos);
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    });
+    input.value = ''; // reset so same file can be re-added
+}
+
+function removeJobPhoto(idx) {
+    _jobPhotos.splice(idx, 1);
+    renderPhotoGrid(_jobPhotos);
+}
+
+function viewJobPhoto(idx) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.96);z-index:99999;display:flex;align-items:center;justify-content:center;cursor:zoom-out;flex-direction:column;gap:16px';
+    overlay.onclick = () => overlay.remove();
+    const img = document.createElement('img');
+    img.src = _jobPhotos[idx];
+    img.style.cssText = 'max-width:92vw;max-height:85vh;border-radius:16px;object-fit:contain;box-shadow:0 0 60px rgba(0,0,0,0.8)';
+    const hint = document.createElement('p');
+    hint.style.cssText = 'color:#64748b;font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:0.1em';
+    hint.textContent = `Photo ${idx+1} of ${_jobPhotos.length} — click anywhere to close`;
+    overlay.append(img, hint);
+    document.body.appendChild(overlay);
+}
+
+// ─── DELETE JOB ──────────────────────────────────────────────────────────────
+function deleteCurrentJob() {
+    const id = document.getElementById('m-job-id').value;
+    if (!id) return;
+    const j  = db.jobs.find(x => x.jobNo === id);
+    if (!j)  return;
+    if (confirm(`Delete ${id} (${j.rego} — ${j.name})? This cannot be undone.`)) {
+        db.jobs = db.jobs.filter(x => x.jobNo !== id);
+        sync(); closeModal(); renderData();
+    }
+}
+
+// ─── DELETE CUSTOMER / VEHICLE ────────────────────────────────────────────────
+function deleteCustomer(name) {
+    const jobCount = db.jobs.filter(j => j.name === name).length;
+    const msg = jobCount > 0
+        ? `Remove "${name}" from the Customer Vault?\n\nThis customer has ${jobCount} linked job(s). Removing them keeps all jobs and vehicles fully intact.`
+        : `Remove "${name}" from the Customer Vault?\n\nAll linked vehicles and job records remain untouched.`;
+    if (!confirm(msg)) return;
+    delete db.customers[name];
+    sync(); closeModal(); renderData();
+}
+function deleteVehicle(rego) {
+    const jobCount = db.jobs.filter(j => j.rego === rego).length;
+    const msg = jobCount > 0
+        ? `Remove "${rego}" from the Vehicle Fleet?\n\nThis vehicle has ${jobCount} linked job(s). Removing it keeps all jobs and customer records fully intact.`
+        : `Remove "${rego}" from the Vehicle Fleet?\n\nAll job records and customer data remain untouched.`;
+    if (!confirm(msg)) return;
+    delete db.vehicles[rego];
+    sync(); closeModal(); renderData();
+}
+
+// ─── NEW BOOKING ─────────────────────────────────────────────────────────────
+function saveBooking(e) {
+    e.preventDefault();
+    const jId = 'JOB-' + Math.floor(Math.random()*90000+10000);
+    const r   = document.getElementById('b-rego').value.toUpperCase().trim();
+    db.jobs.push({ jobNo:jId, date:document.getElementById('b-date').value, time:document.getElementById('b-time').value, name:document.getElementById('b-name').value, phone:document.getElementById('b-phone').value, email:document.getElementById('b-email').value, rego:r, status:'Unstarted', labour:0, report:document.getElementById('b-report').value, parts:[], photos:[] });
+    if (!db.vehicles[r]) db.vehicles[r] = { owner:document.getElementById('b-name').value, make:'', model:'', year:'', capacity:'', info:[] };
+    const _cName = document.getElementById('b-name').value;
+    db.customers[_cName] = { name:_cName, phone:document.getElementById('b-phone').value, email:document.getElementById('b-email').value };
+    sync();
+    ['b-date','b-time','b-name','b-phone','b-email','b-rego','b-report'].forEach(id=>document.getElementById(id).value='');
+    showView('dashboard');
+}
+
+function updateAvailableTimes() {
+    const dStr = document.getElementById('b-date').value;
+    const sel = document.getElementById('b-time');
+    sel.innerHTML = '<option value="">— Select Time —</option>';
+    if (!dStr) return;
+    const bookedTimes = db.jobs.filter(j => j.date === dStr).map(j => j.time);
+    for(let h=8; h<=19; h++) {
+        for(let m of ['00', '30']) {
+            const tForm = `${h.toString().padStart(2,'0')}:${m}`;
+            if (!bookedTimes.includes(tForm)) {
+                const ampm = h >= 12 ? 'PM' : 'AM';
+                const h12 = h % 12 || 12;
+                const dForm = `${h12}:${m} ${ampm}`;
+                sel.innerHTML += `<option value="${tForm}">${dForm}</option>`;
+            }
+        }
+    }
+}
+
+// ─── VEHICLE LOGBOOK ─────────────────────────────────────────────────────────
+function appendVehicleNote() {
+    const n = document.getElementById('m-vinfo-new').value.trim(); if (!n) return;
+    const id = document.getElementById('m-job-id').value;
+    const j  = db.jobs.find(x => x.jobNo === id); if (!j) return;
+    const v  = db.vehicles[j.rego]; if (!v.info) v.info = [];
+    v.info.unshift(`[${new Date().toLocaleDateString('en-AU')}] ${n}`);
+    document.getElementById('m-vinfo-new').value = '';
+    renderVehicleHistorySmall(v); sync();
+}
+function renderVehicleHistorySmall(v) {
+    const c = document.getElementById('m-vinfo-history'); if (!c) return;
+    const jId = document.getElementById('m-job-id').value;
+    const j   = db.jobs.find(x => x.jobNo === jId);
+    const rego = j ? j.rego : null;
+    if (!v.info || !v.info.length) { c.innerHTML='<p class="text-[9px] text-slate-600 italic">No logbook entries yet.</p>'; return; }
+    c.innerHTML = v.info.map((n, idx) => `
+        <div class="flex items-start gap-2 bg-slate-900 p-2 rounded-lg mb-1 group">
+            <span class="flex-1 text-[9px] text-slate-400 italic">${n}</span>
+            <button type="button" onclick="deleteVehicleNote('${rego}',${idx})" class="shrink-0 text-red-700 hover:text-red-400 text-[10px] font-black opacity-50 group-hover:opacity-100 transition-all leading-none">&times;</button>
+        </div>`).join('');
+}
+function deleteVehicleNote(rego, idx) {
+    if (!db.vehicles[rego] || !db.vehicles[rego].info) return;
+    db.vehicles[rego].info.splice(idx, 1);
+    sync();
+    renderVehicleHistorySmall(db.vehicles[rego]);
+}
+
+// ─── PROFILES ────────────────────────────────────────────────────────────────
+function openCustomerProfile(n) {
+    const jobs = db.jobs.filter(j=>j.name===n);
+    // Fall back to db.customers so profiles open even when all jobs are deleted
+    const custRecord = db.customers[n] || (jobs[0] ? { name: n, phone: jobs[0].phone||'', email: jobs[0].email||'' } : { name: n, phone:'', email:'' });
+    if (!jobs.length && !db.customers[n]) return; // nothing to show at all
+
+    const regs = [...new Set(jobs.map(j=>j.rego))];
+    const activeJobs = jobs.filter(j => j.status !== 'Cancelled');
+    const total = activeJobs.reduce((s,j)=>s+parseFloat(j.labour||0)+(j.parts||[]).reduce((sp,p)=>sp+p.qty*p.sellPrice,0),0);
+    document.getElementById('p-title').innerText    = n;
+    document.getElementById('p-subtitle').innerText = `${custRecord.phone||''} · ${custRecord.email||''} · ${jobs.length} job(s) · $${total.toFixed(2)} lifetime spend`;
+
+    const vegBadges = regs.map(r =>
+        `<button type="button" onclick="openVehicleProfile('${r}')" class="inline-block bg-orange-950 border border-orange-700 text-orange-400 font-black uppercase text-sm px-4 py-2 rounded-2xl cursor-pointer hover:bg-orange-700 hover:text-white transition-all mr-2 mb-2">
+            <i class="fas fa-car mr-2 text-xs"></i>${r}
+        </button>`
+    ).join('');
+
+    const nameEscaped = n.replace(/'/g,"\\'");
+    const phoneSafe   = custRecord.phone.replace(/'/g,"\\'");
+    const emailSafe   = custRecord.email.replace(/'/g,"\\'");
+
+    document.getElementById('p-dynamic-content').innerHTML = `
+        <button type="button" onclick="createNewBookingFromProfile('${nameEscaped}', '${phoneSafe}', '${emailSafe}', '')" class="w-full bg-red-600 hover:bg-red-700 text-white font-black uppercase text-xs px-4 py-4 rounded-3xl transition-all mb-6 shadow-2xl tracking-widest text-center">
+            <i class="fas fa-calendar-plus mr-2 text-lg align-middle"></i> Reschedule Next Booking
+        </button>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="p-8 bg-slate-950 rounded-3xl border border-slate-800">
+                <p class="text-[9px] font-black text-slate-500 uppercase mb-3">Contact</p>
+                <p class="text-white font-bold">${custRecord.phone||'—'}</p>
+                <p class="text-blue-400 italic mt-1 text-sm">${custRecord.email||'—'}</p>
+            </div>
+            <div class="p-8 bg-slate-950 rounded-3xl border border-slate-800">
+                <p class="text-[9px] font-black text-orange-400 uppercase mb-3">Registered Vehicles — click to view</p>
+                <div class="flex flex-wrap gap-1">${vegBadges||'<span class="text-slate-600 italic text-xs">No vehicles linked</span>'}</div>
+            </div>
+        </div>
+        <div class="mt-6 pt-5 border-t border-slate-800 flex justify-end">
+            <button type="button" onclick="deleteCustomer('${nameEscaped}')" class="bg-red-950 border border-red-800 text-red-400 hover:bg-red-900 hover:text-white px-5 py-2.5 rounded-2xl text-xs font-black uppercase transition-all">
+                <i class="fas fa-user-minus mr-2"></i> Delete Customer Record
+            </button>
+        </div>`;
+    renderHistoryTable(jobs);
+    document.getElementById('profileModal').classList.add('active');
+}
+function openVehicleProfile(rego) {
+    const v = db.vehicles[rego]; if (!v) return;
+    const jobs = db.jobs.filter(j=>j.rego===rego).sort((a,b)=>new Date(b.date)-new Date(a.date));
+    const ownerName = v.owner || '';
+    document.getElementById('p-title').innerText    = rego;
+    document.getElementById('p-subtitle').innerText = `${v.make||''} ${v.model||''} · ${v.capacity||''} · Owner: ${ownerName||'—'}`;
+
+    // Build logbook section for the profile
+    let logbookHtml = '';
+    if (v.info && v.info.length) {
+        logbookHtml = `<div class="p-6 bg-slate-950 rounded-3xl border border-yellow-900/40 mt-6">
+            <p class="text-[9px] font-black text-yellow-500 uppercase mb-3"><i class="fas fa-book mr-1"></i> Vehicle Logbook</p>
+            ${v.info.map(n=>`<div class="text-[10px] text-slate-400 italic border-b border-slate-800 py-2">${n}</div>`).join('')}
+        </div>`;
+    }
+
+    const regoSafe = rego.replace(/'/g,"\\'");
+    const nameEscaped = (ownerName || '').replace(/'/g,"\\'");
+    const lastJob = jobs[0] || {};
+    const phoneSafe = (lastJob.phone || '').replace(/'/g,"\\'");
+    const emailSafe = (lastJob.email || '').replace(/'/g,"\\'");
+
+    document.getElementById('p-dynamic-content').innerHTML = `
+        <button type="button" onclick="createNewBookingFromProfile('${nameEscaped}', '${phoneSafe}', '${emailSafe}', '${regoSafe}')" class="w-full bg-red-600 hover:bg-red-700 text-white font-black uppercase text-xs px-4 py-4 rounded-3xl transition-all mb-6 shadow-2xl tracking-widest text-center">
+            <i class="fas fa-calendar-plus mr-2 text-lg align-middle"></i> Reschedule Next Booking
+        </button>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-2">
+            <div class="p-6 bg-slate-950 rounded-3xl border border-slate-800 text-center"><p class="text-[9px] font-black text-slate-500 uppercase">Make</p><p class="text-white font-black mt-2">${v.make||'—'}</p></div>
+            <div class="p-6 bg-slate-950 rounded-3xl border border-slate-800 text-center"><p class="text-[9px] font-black text-slate-500 uppercase">Model</p><p class="text-white font-black mt-2">${v.model||'—'}</p></div>
+            <div class="p-6 bg-slate-950 rounded-3xl border border-slate-800 text-center"><p class="text-[9px] font-black text-slate-500 uppercase">Engine</p><p class="text-red-400 font-black mt-2">${v.capacity||'—'}</p></div>
+            <div class="p-6 bg-slate-950 rounded-3xl border border-slate-800 text-center"><p class="text-[9px] font-black text-slate-500 uppercase">Jobs</p><p class="text-blue-400 font-black text-2xl mt-2">${jobs.length}</p></div>
+        </div>
+        ${ownerName ? `<div class="p-4 bg-blue-950/30 border border-blue-800/40 rounded-2xl flex items-center justify-between">
+            <span class="text-[10px] font-black text-slate-400 uppercase">Owner</span>
+            <button type="button" onclick="openCustomerProfile('${ownerName.replace(/'/g,"\\'")}')" class="bg-blue-900/50 border border-blue-700 text-blue-400 hover:bg-blue-800 hover:text-white font-black uppercase text-xs px-4 py-2 rounded-2xl transition-all">
+                <i class="fas fa-user mr-2"></i>${ownerName}
+            </button>
+        </div>` : ''}
+        ${logbookHtml}
+        <div class="mt-6 pt-5 border-t border-slate-800 flex justify-end">
+            <button type="button" onclick="deleteVehicle('${regoSafe}')" class="bg-red-950 border border-red-800 text-red-400 hover:bg-red-900 hover:text-white px-5 py-2.5 rounded-2xl text-xs font-black uppercase transition-all">
+                <i class="fas fa-car mr-2"></i> Remove from Fleet
+            </button>
+        </div>`;
+    renderHistoryTable(jobs);
+    document.getElementById('profileModal').classList.add('active');
+}
+function renderHistoryTable(jobs) {
+    const tb=document.getElementById('p-history-table'); tb.innerHTML='';
+    if (!jobs.length) { tb.innerHTML=`<tr><td colspan="5" class="p-8 text-center text-slate-600 italic">No history.</td></tr>`; return; }
+    jobs.forEach(j => {
+        const sc=j.status==='Completed'?'text-green-500':(j.status==='Cancelled'?'text-pink-400':(j.status==='Unstarted'?'text-red-500':'text-orange-500'));
+        const partsTotal=(j.parts||[]).reduce((s,p)=>s+p.qty*p.sellPrice,0);
+        tb.innerHTML+=`<tr class="hover:bg-slate-900/50 clickable-row" onclick="closeModal();openManage('${j.jobNo}')"><td class="p-6 font-mono text-slate-500 text-[10px]">${j.jobNo}</td><td class="p-6 text-slate-400 text-[10px]">${j.date}</td><td class="p-6 italic text-slate-300 text-[10px]">${j.report||'—'}</td><td class="p-6 text-right text-[10px] font-black ${sc}">${j.status}</td><td class="p-6 text-right font-black text-green-500 text-[10px]">$${(parseFloat(j.labour||0)+partsTotal).toFixed(2)}</td></tr>`;
+    });
+}
+
+// ─── STOCK ───────────────────────────────────────────────────────────────────
+function openStockModal() { document.getElementById('s-index').value='-1'; document.getElementById('s-date').value=''; document.getElementById('s-item').value=''; document.getElementById('s-qty').value=''; document.getElementById('s-price').value=''; document.getElementById('s-delete-btn').classList.add('hidden'); document.getElementById('stock-modal-title').innerText='Log New Asset'; document.getElementById('stockModal').classList.add('active'); }
+function openManageStock(idx) { const s=db.stock[idx]; if(!s)return; document.getElementById('s-index').value=idx; document.getElementById('s-date').value=s.date; document.getElementById('s-type').value=s.type; document.getElementById('s-item').value=s.item; document.getElementById('s-qty').value=s.qty; document.getElementById('s-price').value=s.price; document.getElementById('s-delete-btn').classList.remove('hidden'); document.getElementById('stock-modal-title').innerText='Edit Asset'; document.getElementById('stockModal').classList.add('active'); }
+function saveStockItem(e) { e.preventDefault(); const idx=parseInt(document.getElementById('s-index').value); const data={date:document.getElementById('s-date').value,type:document.getElementById('s-type').value,item:document.getElementById('s-item').value,qty:parseInt(document.getElementById('s-qty').value),price:parseFloat(document.getElementById('s-price').value)}; if(idx===-1)db.stock.push(data); else db.stock[idx]=data; sync();closeModal();renderData(); }
+function deleteStockItem() { const idx=parseInt(document.getElementById('s-index').value); if(idx>=0&&confirm('Delete asset?')){db.stock.splice(idx,1);sync();closeModal();renderData();} }
+
+// ─── FEES ────────────────────────────────────────────────────────────────────
+function openFeeModal() { document.getElementById('fee-index').value='-1'; document.getElementById('fee-service').value=''; document.getElementById('fee-price').value=''; document.getElementById('fee-delete-btn').classList.add('hidden'); document.getElementById('fee-modal-title').innerText='Add Service Fee'; document.getElementById('feeModal').classList.add('active'); }
+function openEditFeeModal(i) { const f=db.serviceFees[i]; document.getElementById('fee-index').value=i; document.getElementById('fee-service').value=f.service; document.getElementById('fee-price').value=f.price; document.getElementById('fee-delete-btn').classList.remove('hidden'); document.getElementById('fee-modal-title').innerText='Edit Service Fee'; document.getElementById('feeModal').classList.add('active'); }
+function saveServiceFee(e) { e.preventDefault(); const i=parseInt(document.getElementById('fee-index').value); const data={service:document.getElementById('fee-service').value,price:parseFloat(document.getElementById('fee-price').value)}; if(i===-1)db.serviceFees.push(data); else db.serviceFees[i]=data; sync();closeModal();renderData(); }
+function deleteFeeReal() { if(confirm('Delete fee?')){db.serviceFees.splice(parseInt(document.getElementById('fee-index').value),1);sync();closeModal();renderData();} }
+
+// ─── BOOKING MANAGEMENT CALENDAR ────────────────────────────────────────────
+function setCalView(mode) { calViewMode = mode; renderBookingManagement(); }
+function calNav(dir) {
+    const d = calFocusDate;
+    if      (calViewMode==='day')   d.setDate(d.getDate() + dir);
+    else if (calViewMode==='week')  d.setDate(d.getDate() + dir*7);
+    else if (calViewMode==='month') d.setMonth(d.getMonth() + dir);
+    else if (calViewMode==='year')  d.setFullYear(d.getFullYear() + dir);
+    renderBookingManagement();
+}
+function calGoToday() { calFocusDate = new Date(new Date().toISOString().split('T')[0]); renderBookingManagement(); }
+function calSelectDay(ds) {
+    calFocusDate = new Date(ds);
+    calViewMode  = 'day';
+    renderBookingManagement();
+}
+function calSelectMonth(y, m) {
+    calFocusDate = new Date(y, m, 1);
+    calViewMode  = 'month';
+    renderBookingManagement();
+}
+
+function renderBookingManagement() {
+    const container  = document.getElementById('view-rescheduled');
+    const fd         = calFocusDate;
+    const todayStr   = new Date().toISOString().split('T')[0];
+    const modeCls    = (m) => `px-5 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${calViewMode===m?'bg-red-600 text-white':'bg-slate-950 text-slate-500 hover:bg-slate-800'}`;
+
+    // Build nav label
+    let navLabel = '';
+    if (calViewMode==='day') {
+        navLabel = fd.toLocaleDateString('en-AU', {weekday:'long', day:'numeric', month:'long', year:'numeric'});
+    } else if (calViewMode==='week') {
+        const wStart = getWeekStart(fd);
+        const wEnd   = new Date(wStart); wEnd.setDate(wEnd.getDate()+6);
+        navLabel = `${wStart.toLocaleDateString('en-AU',{day:'numeric',month:'short'})} – ${wEnd.toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'})}`;
+    } else if (calViewMode==='month') {
+        navLabel = fd.toLocaleDateString('en-AU', {month:'long', year:'numeric'});
+    } else {
+        navLabel = fd.getFullYear().toString();
+    }
+
+    // Header
+    let html = `
+    <div class="bg-slate-900 rounded-[40px] border border-slate-800 shadow-2xl overflow-hidden">
+      <div class="flex flex-wrap items-center justify-between px-8 py-5 border-b border-slate-800 gap-4">
+        <div class="flex gap-2 overflow-x-auto pb-1 sm:pb-0">
+          <button onclick="setCalView('day')"   class="${modeCls('day')} shrink-0">Day</button>
+          <button onclick="setCalView('week')"  class="${modeCls('week')} shrink-0">Week</button>
+          <button onclick="setCalView('month')" class="${modeCls('month')} shrink-0">Month</button>
+          <button onclick="setCalView('year')"  class="${modeCls('year')} shrink-0">Year</button>
+        </div>
+        <div class="flex items-center gap-3 flex-1 justify-center min-w-[200px]">
+          <button onclick="calNav(-1)" class="bg-slate-800 hover:bg-slate-700 text-white w-9 h-9 shrink-0 rounded-xl flex items-center justify-center font-black transition-all">&lsaquo;</button>
+          <span class="font-black text-white italic text-sm text-center truncate px-2 select-none">${navLabel}</span>
+          <button onclick="calNav(1)"  class="bg-slate-800 hover:bg-slate-700 text-white w-9 h-9 shrink-0 rounded-xl flex items-center justify-center font-black transition-all">&rsaquo;</button>
+        </div>
+        <button onclick="calGoToday()" class="bg-slate-800 hover:bg-red-700 text-slate-300 hover:text-white px-4 py-2 shrink-0 rounded-xl text-[10px] font-black uppercase transition-all">Today</button>
+      </div>`;
+
+    // ── DAY VIEW ────────────────────────────────────────────────────────────
+    if (calViewMode === 'day') {
+        const ds = fmtDate(fd);
+        const jobs = db.jobs.filter(j=>j.date===ds).sort((a,b)=>a.time.localeCompare(b.time));
+        html += `<div class="p-8">`;
+        html += renderMiniCal(fd, todayStr, ds);
+        html += `<div class="mt-6">`;
+        html += `<div class="flex items-center justify-between mb-4"><p class="text-[10px] font-black text-slate-400 uppercase">Bookings on ${fd.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'})}</p><span class="bg-red-900/40 border border-red-700/50 text-red-400 px-3 py-1 rounded-lg text-[10px] font-black">${jobs.length} Jobs</span></div>`;
+        html += renderJobTable(jobs);
+        html += `</div></div>`;
+    }
+
+    // ── WEEK VIEW ────────────────────────────────────────────────────────────
+    else if (calViewMode === 'week') {
+        const wStart = getWeekStart(fd);
+        const days   = [];
+        for (let i=0;i<7;i++) { const d=new Date(wStart); d.setDate(d.getDate()+i); days.push(d); }
+        const weekJobs = db.jobs.filter(j=>{
+            const jd=new Date(j.date);
+            return jd>=wStart && jd<=days[6];
+        }).sort((a,b)=>new Date(a.date+' '+a.time)-new Date(b.date+' '+b.time));
+
+        html += `<div class="p-8">`;
+        // Week strip
+        html += `<div class="grid grid-cols-7 gap-2 mb-6">`;
+        const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        days.forEach((d,i) => {
+            const ds    = fmtDate(d);
+            const cnt   = db.jobs.filter(j=>j.date===ds).length;
+            const isToday = ds === todayStr;
+            const isFocus = ds === fmtDate(fd);
+            html += `<div onclick="calSelectDay('${ds}')" class="cal-day text-center cursor-pointer ${isToday?'border-red-500 border-2':''} ${isFocus?'bg-blue-900/30 border-blue-500':''} hover:border-blue-400 transition-all">
+                <p class="text-[9px] font-black text-slate-500 uppercase">${dayNames[i]}</p>
+                <p class="text-lg font-black ${isToday?'text-red-400':isFocus?'text-blue-400':'text-white'} mt-1">${d.getDate()}</p>
+                ${cnt ? `<div class="cal-badge mx-auto mt-1" style="display:inline-block">${cnt}</div>` : ''}
+            </div>`;
+        });
+        html += `</div>`;
+        html += `<div class="flex items-center justify-between mb-4"><p class="text-[10px] font-black text-slate-400 uppercase">All bookings this week</p><span class="bg-blue-900/40 border border-blue-700/50 text-blue-400 px-3 py-1 rounded-lg text-[10px] font-black">${weekJobs.length} Jobs</span></div>`;
+        html += renderJobTable(weekJobs);
+        html += `</div>`;
+    }
+
+    // ── MONTH VIEW ───────────────────────────────────────────────────────────
+    else if (calViewMode === 'month') {
+        const y = fd.getFullYear(), m = fd.getMonth();
+        const dInM = new Date(y,m+1,0).getDate();
+        const first = new Date(y,m,1).getDay();
+        const monthJobs = db.jobs.filter(j=>{
+            const jd=new Date(j.date); return jd.getFullYear()===y && jd.getMonth()===m;
+        }).sort((a,b)=>new Date(a.date+' '+a.time)-new Date(b.date+' '+b.time));
+
+        html += `<div class="p-8"><div class="calendar-grid mb-2">`;
+        ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d=>{ html+=`<div class="text-center text-[10px] font-black text-slate-500 uppercase pb-2">${d}</div>`; });
+        for (let i=0;i<first;i++) html+=`<div></div>`;
+        for (let d=1;d<=dInM;d++) {
+            const ds=`${y}-${(m+1).toString().padStart(2,'0')}-${d.toString().padStart(2,'0')}`;
+            const cnt=db.jobs.filter(j=>j.date===ds).length;
+            const isToday=ds===todayStr;
+            html+=`<div class="cal-day ${isToday?'border-red-500 border-2':''}" onclick="calSelectDay('${ds}')">
+                <p class="text-xs font-black ${isToday?'text-red-400':'text-slate-400'}">${d}</p>
+                ${cnt ? `<div class="cal-badge">${cnt} JOBS</div>` : ''}
+            </div>`;
+        }
+        html += `</div>`;
+        html += `<div class="flex items-center justify-between mt-6 mb-4"><p class="text-[10px] font-black text-slate-400 uppercase">All bookings in ${fd.toLocaleDateString('en-AU',{month:'long',year:'numeric'})}</p><span class="bg-orange-900/40 border border-orange-700/50 text-orange-400 px-3 py-1 rounded-lg text-[10px] font-black">${monthJobs.length} Jobs</span></div>`;
+        html += renderJobTable(monthJobs);
+        html += `</div>`;
+    }
+
+    // ── YEAR VIEW ────────────────────────────────────────────────────────────
+    else if (calViewMode === 'year') {
+        const y = fd.getFullYear();
+        const yearJobs = db.jobs.filter(j=>new Date(j.date).getFullYear()===y);
+        const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const monthFull  = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+        html += `<div class="p-8">`;
+        // 12-month grid
+        html += `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">`;
+        for (let mi=0;mi<12;mi++) {
+            const cnt = db.jobs.filter(j=>{ const jd=new Date(j.date); return jd.getFullYear()===y&&jd.getMonth()===mi; }).length;
+            const isCurrentMonth = new Date().getFullYear()===y && new Date().getMonth()===mi;
+            html += `<div onclick="calSelectMonth(${y},${mi})" class="bg-slate-950 rounded-3xl border ${isCurrentMonth?'border-red-500':'border-slate-800'} p-5 cursor-pointer hover:border-blue-500 transition-all group">
+                <p class="text-sm font-black text-white group-hover:text-blue-400 transition-colors">${monthFull[mi]}</p>
+                <div class="flex items-end justify-between mt-3">
+                    <span class="text-3xl font-black ${cnt>0?'text-red-400':'text-slate-700'}">${cnt}</span>
+                    <p class="text-[9px] font-black text-slate-600 uppercase">${cnt===1?'booking':'bookings'}</p>
+                </div>
+            </div>`;
+        }
+        html += `</div>`;
+        // Year summary stats
+        const yearRevenue = yearJobs.reduce((s,j)=>s+parseFloat(j.labour||0),0);
+        const yearCompleted = yearJobs.filter(j=>j.status==='Completed').length;
+        html += `<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+            <div class="bg-slate-950 rounded-2xl border border-slate-800 p-5 text-center"><p class="text-[9px] font-black text-slate-500 uppercase">Total Bookings</p><h3 class="text-3xl font-black text-white mt-1">${yearJobs.length}</h3></div>
+            <div class="bg-slate-950 rounded-2xl border border-green-900/40 p-5 text-center"><p class="text-[9px] font-black text-slate-500 uppercase">Completed</p><h3 class="text-3xl font-black text-green-500 mt-1">${yearCompleted}</h3></div>
+            <div class="bg-slate-950 rounded-2xl border border-blue-900/40 p-5 text-center"><p class="text-[9px] font-black text-slate-500 uppercase">Labour Revenue</p><h3 class="text-3xl font-black text-blue-400 mt-1">$${yearRevenue.toFixed(0)}</h3></div>
+        </div>`;
+        html += `<div class="flex items-center justify-between mb-4"><p class="text-[10px] font-black text-slate-400 uppercase">All bookings in ${y}</p></div>`;
+        html += renderJobTable(yearJobs.sort((a,b)=>new Date(a.date+' '+a.time)-new Date(b.date+' '+b.time)));
+        html += `</div>`;
+    }
+
+    html += `</div>`;
+
+    // ── JOB REGISTRY (embedded tab at bottom) ────────────────────────────────
+    const bfCls = (f) => `flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${currentFilter===f?'bg-red-600 text-white':'bg-slate-900 text-slate-400 hover:bg-slate-800'}`;
+    html += `
+    <div class="bg-slate-900 rounded-[40px] border border-slate-800 shadow-2xl overflow-hidden">
+        <div class="px-8 py-5 border-b border-slate-800">
+            <h3 class="text-sm font-black uppercase text-white italic tracking-tighter"><i class="fas fa-clipboard-list mr-2 text-orange-400"></i>Jobs Registry</h3>
+        </div>
+        <div class="p-6 space-y-4">
+            <div class="flex gap-2">
+                <button onclick="filterJobs('All');renderBookingManagement()"         class="${bfCls('All')}">All</button>
+                <button onclick="filterJobs('Unstarted');renderBookingManagement()"   class="${bfCls('Unstarted')} text-red-400">🛑 Unstarted</button>
+                <button onclick="filterJobs('In Progress');renderBookingManagement()" class="${bfCls('In Progress')} text-orange-400">🔧 In Progress</button>
+                <button onclick="filterJobs('Completed');renderBookingManagement()"   class="${bfCls('Completed')} text-green-400">✅ Completed</button>
+                <button onclick="filterJobs('Cancelled');renderBookingManagement()"   class="${bfCls('Cancelled')} text-pink-300">❌ Cancelled</button>
+            </div>`;
+    const allJobs = db.jobs.filter(j => currentFilter === 'All' || j.status === currentFilter)
+                           .sort((a,b) => new Date(b.date) - new Date(a.date));
+    html += renderJobTable(allJobs);
+    html += `</div></div>`;
+
+    container.innerHTML = html;
+}
+
+function fmtDate(d) {
+    return `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getDate().toString().padStart(2,'0')}`;
+}
+function getWeekStart(d) {
+    const ws = new Date(d);
+    ws.setDate(d.getDate() - d.getDay()); // Sunday
+    return ws;
+}
+function renderMiniCal(focusDt, todayStr, highlightDs) {
+    const y=focusDt.getFullYear(), m=focusDt.getMonth();
+    const dInM=new Date(y,m+1,0).getDate(), first=new Date(y,m,1).getDay();
+    let h=`<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;">`;
+    ['S','M','T','W','T','F','S'].forEach(d=>{ h+=`<div style="text-align:center;font-size:0.6rem;font-weight:900;color:#475569;padding-bottom:4px;">${d}</div>`; });
+    for(let i=0;i<first;i++) h+=`<div></div>`;
+    for(let d=1;d<=dInM;d++) {
+        const ds=`${y}-${(m+1).toString().padStart(2,'0')}-${d.toString().padStart(2,'0')}`;
+        const cnt=db.jobs.filter(j=>j.date===ds).length;
+        const isToday=ds===todayStr, isSel=ds===highlightDs;
+        h+=`<div onclick="calSelectDay('${ds}')" style="text-align:center;padding:4px 2px;border-radius:8px;cursor:pointer;font-size:0.7rem;font-weight:800;
+            background:${isSel?'#2563eb':isToday?'#7f1d1d':'transparent'};
+            color:${isSel?'white':isToday?'#fca5a5':cnt?'#f97316':'#94a3b8'};
+            border:${cnt&&!isSel&&!isToday?'1px solid #7c2d12':'1px solid transparent'}">${d}</div>`;
+    }
+    h+=`</div>`;
+    return h;
+}
+function renderJobTable(jobs) {
+    if (!jobs.length) return `<div class="bg-slate-950 rounded-2xl border border-slate-800 p-8 text-center text-slate-600 italic font-bold">No bookings found for this period.</div>`;
+    let h = `<div class="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden">
+        <table class="w-full text-left text-xs">
+        <thead class="bg-slate-900 uppercase font-black text-slate-500"><tr><th class="p-4">Job ID</th><th class="p-4">Date &amp; Time</th><th class="p-4">Plate</th><th class="p-4">Name</th><th class="p-4">Status</th><th class="p-4 text-right">Actions</th></tr></thead>
+        <tbody class="divide-y divide-slate-900">`;
+    jobs.forEach(j => {
+        const sc=j.status==='Completed'?'text-green-500':(j.status==='Cancelled'?'text-pink-400':(j.status==='Unstarted'?'text-red-400':'text-orange-400'));
+        h+=`<tr class="hover:bg-slate-800">
+            <td class="p-4 font-mono text-blue-400 text-[10px] cursor-pointer" onclick="openManage('${j.jobNo}')">${j.jobNo}</td>
+            <td class="p-4 text-slate-400 italic text-[10px] cursor-pointer" onclick="openManage('${j.jobNo}')">${j.date} ${j.time||''}</td>
+            <td class="p-4 font-black text-white uppercase cursor-pointer" onclick="openManage('${j.jobNo}')">${j.rego}</td>
+            <td class="p-4 text-slate-300 cursor-pointer" onclick="openManage('${j.jobNo}')">${j.name}</td>
+            <td class="p-4 font-black uppercase italic ${sc}">${j.status}</td>
+            <td class="p-4 text-right">
+                <button onclick="event.stopPropagation();openEditBooking('${j.jobNo}')" class="bg-orange-900/50 border border-orange-700/60 text-orange-300 hover:bg-orange-600 hover:text-white px-3 py-1.5 rounded-xl text-[9px] font-black uppercase transition-all mr-1"><i class="fas fa-edit mr-1"></i>Edit</button>
+                <button onclick="event.stopPropagation();openRescheduleDate('${j.jobNo}')" class="bg-blue-900/50 border border-blue-700/60 text-blue-300 hover:bg-blue-600 hover:text-white px-3 py-1.5 rounded-xl text-[9px] font-black uppercase transition-all"><i class="fas fa-calendar-alt mr-1"></i>Reschedule</button>
+            </td>
+        </tr>`;
+    });
+    h+=`</tbody></table></div>`;
+    return h;
+}
+
+// ─── FOLDERS MANAGEMENT ────────────────────────────────────────────────────────
+function uuid() { return Math.random().toString(36).substr(2, 9); }
+
+let currentFolderId = null;
+
+function createNewFolder() {
+    const fId = 'folder-' + uuid();
+    db.folders.push({ id: fId, name: 'NEW FOLDER', notes: '', links: [], documents: [] });
+    sync(); renderData();
+    openFolderModal(fId);
+}
+
+function deleteFolder(fId) {
+    if(!confirm('Delete this folder and all its contents?')) return;
+    db.folders = db.folders.filter(f => f.id !== fId);
+    sync(); renderData();
+}
+
+function openFolderModal(fId) {
+    currentFolderId = fId;
+    const f = db.folders.find(x => x.id === fId);
+    if (!f) return;
+    
+    document.getElementById('f-id').value = f.id;
+    document.getElementById('f-name').value = f.name;
+    document.getElementById('f-notes-preview').innerText = f.notes ? f.notes : 'No notes written. Click Edit to add some...';
+    
+    renderFolderDocs(f);
+    
+    document.getElementById('folderModal').classList.add('active');
+}
+
+function updateFolderName(val) {
+    const f = db.folders.find(x => x.id === currentFolderId);
+    if(f) { f.name = val.trim() || 'UNTITLED FOLDER'; sync(); renderData(); }
+}
+
+// ─── PERMANENT WEB LINKS ───────────────────────────────────────────────────
+function addPermLink() {
+    db.webLinks.push({ site: '', url: '', user: '', pass: '' });
+    sync(); renderData();
+}
+function updatePermLink(idx, field, val) {
+    // Save silently without re-rendering to avoid losing input focus
+    if (!db.webLinks[idx]) return;
+    db.webLinks[idx][field] = val;
+    sync();
+}
+function deletePermLink(idx) {
+    db.webLinks.splice(idx, 1);
+    sync(); renderData();
+}
+
+// -- Folder Notes
+function openFolderNoteModal() {
+    const f = db.folders.find(x => x.id === currentFolderId);
+    if(!f) return;
+    document.getElementById('f-note-editor').value = f.notes || '';
+    document.getElementById('folderNoteModal').classList.add('active');
+}
+function closeFolderNoteModal() {
+    const f = db.folders.find(x => x.id === currentFolderId);
+    if(f) {
+        f.notes = document.getElementById('f-note-editor').value;
+        sync(); renderData();
+        document.getElementById('f-notes-preview').innerText = f.notes ? f.notes : 'No notes written. Click Edit to add some...';
+    }
+    document.getElementById('folderNoteModal').classList.remove('active');
+}
+
+// -- Folder Documents
+function renderFolderDocs(f) {
+    const grid = document.getElementById('f-docs-grid');
+    const empty = document.getElementById('f-docs-empty');
+    grid.innerHTML = '';
+    if (!f.documents || !f.documents.length) { empty.style.display='block'; return; }
+    empty.style.display = 'none';
+    f.documents.forEach((src, idx) => {
+        const div = document.createElement('div');
+        div.className = 'relative group rounded-xl overflow-hidden border border-slate-700 cursor-pointer';
+        div.style.aspectRatio = '1';
+        div.innerHTML = `
+            <img src="${src}" class="w-full h-full object-cover" onclick="viewFolderDocument(${idx})">
+            <button type="button" onclick="removeFolderDocument(${idx})"
+                class="absolute top-1 right-1 bg-red-900/80 hover:bg-red-600 text-white w-6 h-6 rounded-full text-xs font-black opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center">
+                &times;
+            </button>`;
+        grid.appendChild(div);
+    });
+}
+function uploadFolderDocuments(input) {
+    const f = db.folders.find(x => x.id === currentFolderId);
+    if(!f) return;
+    if(!f.documents) f.documents = [];
+    const files = Array.from(input.files);
+    if (!files.length) return;
+    let loaded = 0;
+    files.forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                const MAX = 1400; // slightly higher quality for documents
+                let w = img.width, h = img.height;
+                if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+                else if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
+                const cv = document.createElement('canvas');
+                cv.width = w; cv.height = h;
+                cv.getContext('2d').drawImage(img, 0, 0, w, h);
+                f.documents.push(cv.toDataURL('image/jpeg', 0.85));
+                loaded++;
+                if (loaded === files.length) { sync(); renderFolderDocs(f); renderData(); }
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    });
+    input.value = '';
+}
+function removeFolderDocument(idx) {
+    const f = db.folders.find(x => x.id === currentFolderId);
+    if(!f) return;
+    f.documents.splice(idx, 1);
+    sync(); renderFolderDocs(f); renderData();
+}
+function viewFolderDocument(idx) {
+    const f = db.folders.find(x => x.id === currentFolderId);
+    if(!f || !f.documents[idx]) return;
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.96);z-index:99999;display:flex;align-items:center;justify-content:center;cursor:zoom-out;flex-direction:column;gap:16px';
+    overlay.onclick = () => overlay.remove();
+    const img = document.createElement('img');
+    img.src = f.documents[idx];
+    img.style.cssText = 'max-width:92vw;max-height:92vh;border-radius:16px;object-fit:contain;box-shadow:0 0 60px rgba(0,0,0,0.8)';
+    const hint = document.createElement('p');
+    hint.style.cssText = 'color:#64748b;font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:0.1em';
+    hint.textContent = `Document ${idx+1} of ${f.documents.length} — click anywhere to close`;
+    overlay.append(img, hint);
+    document.body.appendChild(overlay);
+}
+
+// ─── BUDGET & PROFIT LOGIC ───────────────────────────────────────────────────
+function setBudgetFilter(f) {
+    budgetFilter = f;
+    renderData();
+}
+
+function openFinancialBreakdown(type) {
+    const today = new Date();
+    const y = today.getFullYear(), m = today.getMonth(), d = today.getDate(), dayOfWeek = today.getDay();
+    const startOfWeek = new Date(y, m, d - dayOfWeek);
+    const startOfMonth = new Date(y, m, 1);
+    const startOfYear = new Date(y, 0, 1);
+
+    const budgetJobs = db.jobs.filter(j => {
+        if (j.status !== 'Completed') return false;
+        const jd = new Date(j.date);
+        if (budgetFilter === 'day')   return jd.toDateString() === today.toDateString();
+        if (budgetFilter === 'week')  return jd >= startOfWeek;
+        if (budgetFilter === 'month') return jd >= startOfMonth;
+        if (budgetFilter === 'year')  return jd >= startOfYear;
+        return true;
+    });
+
+    const th = document.getElementById('fb-table-head');
+    const tb = document.getElementById('fb-table-body');
+    const tTitle = document.getElementById('fb-title');
+    const tTotal = document.getElementById('fb-total');
+    tb.innerHTML = '';
+
+    if (type === 'labour') {
+        tTitle.innerText = 'Labour Revenue';
+        tTitle.className = 'text-2xl font-black uppercase text-blue-400 italic';
+        th.innerHTML = '<th class="p-4">Date</th><th class="p-4">Job ID</th><th class="p-4">Rego</th><th class="p-4 text-right">Labour Charged</th>';
+        
+        let total = 0;
+        budgetJobs.forEach(j => {
+            const lab = parseFloat(j.labour || 0);
+            if (lab > 0) {
+                total += lab;
+                tb.innerHTML += `<tr class="hover:bg-slate-800 transition-colors cursor-pointer" onclick="closeModal(); openManage('${j.jobNo}')">
+                    <td class="p-4 text-slate-500 font-bold text-[10px]">${j.date}</td>
+                    <td class="p-4 text-slate-300 font-mono text-[10px]">${j.jobNo}</td>
+                    <td class="p-4 text-white font-black uppercase">${j.rego}</td>
+                    <td class="p-4 text-right text-blue-400 font-black">$${lab.toFixed(2)}</td>
+                </tr>`;
+            }
+        });
+        if(total === 0) tb.innerHTML = '<tr><td colspan="4" class="p-8 text-center text-slate-600 italic">No labour recorded in this period.</td></tr>';
+        tTotal.innerText = '$' + total.toFixed(2);
+        tTotal.className = 'text-2xl font-black text-blue-400 italic';
+
+    } else if (type === 'markup') {
+        tTitle.innerText = 'Parts Markup';
+        tTitle.className = 'text-2xl font-black uppercase text-orange-400 italic';
+        th.innerHTML = '<th class="p-4">Job / Date</th><th class="p-4">Part Desc</th><th class="p-4 text-center">Cost -> Sell</th><th class="p-4 text-right">Markup Achieved</th>';
+        
+        let total = 0;
+        budgetJobs.forEach(j => {
+            (j.parts || []).forEach(p => {
+                const markup = (p.qty * p.sellPrice) - (p.qty * p.cost);
+                if (markup !== 0) {
+                    total += markup;
+                    tb.innerHTML += `<tr class="hover:bg-slate-800 transition-colors cursor-pointer" onclick="closeModal(); openManage('${j.jobNo}')">
+                        <td class="p-4"><p class="text-slate-300 font-mono text-[10px]">${j.jobNo}</p><p class="text-slate-500 font-bold text-[9px]">${j.date}</p></td>
+                        <td class="p-4 text-white font-bold text-[10px]">${p.desc} <span class="text-slate-500 ml-1">x${p.qty}</span></td>
+                        <td class="p-4 text-center text-slate-400 font-mono text-[9px]">$${p.cost} &rarr; $${p.sellPrice}</td>
+                        <td class="p-4 text-right text-orange-400 font-black">$${markup.toFixed(2)}</td>
+                    </tr>`;
+                }
+            });
+        });
+        if(total === 0) tb.innerHTML = '<tr><td colspan="4" class="p-8 text-center text-slate-600 italic">No parts markup recorded in this period.</td></tr>';
+        tTotal.innerText = '$' + total.toFixed(2);
+        tTotal.className = 'text-2xl font-black text-orange-400 italic';
+
+    } else if (type === 'jobs') {
+        tTitle.innerText = 'Completed Jobs';
+        tTitle.className = 'text-2xl font-black uppercase text-white italic';
+        th.innerHTML = '<th class="p-4">Date</th><th class="p-4">Job ID</th><th class="p-4">Customer</th><th class="p-4">Rego</th><th class="p-4 text-right">Profit</th>';
+        
+        budgetJobs.forEach(j => {
+            const lab = parseFloat(j.labour || 0);
+            const markup = (j.parts || []).reduce((ps, p) => ps + (p.qty * p.sellPrice - p.qty * p.cost), 0);
+            const profit = lab + markup;
+            tb.innerHTML += `<tr class="hover:bg-slate-800 transition-colors cursor-pointer" onclick="closeModal(); openManage('${j.jobNo}')">
+                <td class="p-4 text-slate-500 font-bold text-[10px]">${j.date}</td>
+                <td class="p-4 text-slate-300 font-mono text-[10px]">${j.jobNo}</td>
+                <td class="p-4 text-white font-bold text-[10px]">${j.name}</td>
+                <td class="p-4 text-slate-400 font-black uppercase text-[10px]">${j.rego}</td>
+                <td class="p-4 text-right text-green-500 font-black">$${profit.toFixed(2)}</td>
+            </tr>`;
+        });
+        if(budgetJobs.length === 0) tb.innerHTML = '<tr><td colspan="5" class="p-8 text-center text-slate-600 italic">No completed jobs in this period.</td></tr>';
+        tTotal.innerText = budgetJobs.length + ' Jobs';
+        tTotal.className = 'text-2xl font-black text-white italic';
+    }
+
+    document.getElementById('financialBreakdownModal').classList.add('active');
+}
+
+function renderBudgetPeriodChart(jobs) {
+    const ctx = document.getElementById('budgetPeriodChart');
+    if (!ctx) return;
+    if (window.budgetChart) window.budgetChart.destroy();
+
+    let labels = [], dataLab = [], dataMark = [];
+    let type = 'bar'; // Default to bar chart for short periods
+    
+    if (budgetFilter === 'day') {
+        // Doughnut chart showing Labour vs Markup for the day
+        type = 'doughnut';
+        labels = ['Labour Revenue', 'Parts Markup'];
+        const l = jobs.reduce((s,j)=>s+parseFloat(j.labour||0), 0);
+        const m = jobs.reduce((s,j)=>s+(j.parts||[]).reduce((ps,p)=>ps+(p.qty*p.sellPrice - p.qty*p.cost),0), 0);
+        dataLab = [l, m];
+        
+    } else if (budgetFilter === 'week') {
+        // 7 days bar chart
+        labels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        dataLab = Array(7).fill(0); dataMark = Array(7).fill(0);
+        jobs.forEach(j => {
+            const day = new Date(j.date).getDay();
+            dataLab[day] += parseFloat(j.labour||0);
+            dataMark[day] += (j.parts||[]).reduce((ps,p)=>ps+(p.qty*p.sellPrice - p.qty*p.cost),0);
+        });
+        
+    } else if (budgetFilter === 'month') {
+        // Daily progression line chart
+        type = 'line';
+        const dInM = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).getDate();
+        labels = Array.from({length: dInM}, (_, i) => i+1);
+        dataLab = Array(dInM).fill(0); dataMark = Array(dInM).fill(0);
+        jobs.forEach(j => {
+            const d = new Date(j.date).getDate() - 1;
+            dataLab[d] += parseFloat(j.labour||0);
+            dataMark[d] += (j.parts||[]).reduce((ps,p)=>ps+(p.qty*p.sellPrice - p.qty*p.cost),0);
+        });
+        
+    } else {
+        // Year or Lifetime - Monthly line chart
+        type = 'line';
+        labels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        dataLab = Array(12).fill(0); dataMark = Array(12).fill(0);
+        jobs.forEach(j => {
+            const m = new Date(j.date).getMonth();
+            dataLab[m] += parseFloat(j.labour||0);
+            dataMark[m] += (j.parts||[]).reduce((ps,p)=>ps+(p.qty*p.sellPrice - p.qty*p.cost),0);
+        });
+    }
+
+    const config = {
+        type: type,
+        data: {
+            labels: labels,
+            datasets: budgetFilter === 'day' ? [
+                {
+                    data: dataLab,
+                    backgroundColor: ['rgba(59, 130, 246, 0.8)', 'rgba(249, 115, 22, 0.8)'],
+                    borderColor: ['#3b82f6', '#f97316'],
+                    borderWidth: 2,
+                    hoverOffset: 4
+                }
+            ] : [
+                {
+                    label: 'Labour',
+                    data: dataLab,
+                    backgroundColor: type === 'line' ? 'rgba(59, 130, 246, 0.1)' : '#3b82f6',
+                    borderColor: '#3b82f6',
+                    fill: type === 'line',
+                    tension: 0.4
+                },
+                {
+                    label: 'Markup',
+                    data: dataMark,
+                    backgroundColor: type === 'line' ? 'rgba(249, 115, 22, 0.1)' : '#f97316',
+                    borderColor: '#f97316',
+                    fill: type === 'line',
+                    tension: 0.4
+                }
+            ]
+        },
+        options: {
+            maintainAspectRatio: false,
+            responsive: true,
+            plugins: {
+                legend: {
+                    position: budgetFilter === 'day' ? 'bottom' : 'top',
+                    labels: { color: '#94a3b8', font: { weight: 'bold', size: 10 } }
+                },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    callbacks: { label: (ctx) => ctx.dataset.label ? ctx.dataset.label + ': $' + ctx.raw.toFixed(2) : '$' + ctx.raw.toFixed(2) }
+                }
+            },
+            scales: budgetFilter === 'day' ? {} : {
+                x: { stacked: type === 'bar', grid: { color: '#1e293b' }, ticks: { color: '#64748b', font: {size: 10} } },
+                y: { stacked: type === 'bar', grid: { color: '#1e293b' }, ticks: { color: '#64748b', callback: v => '$' + v, font: {size: 10} }, beginAtZero: true }
+            }
+        }
+    };
+    window.budgetChart = new Chart(ctx.getContext('2d'), config);
+}
+
+function createNewBookingFromProfile(name, phone, email, rego) {
+    closeModal();
+    showView('bookings');
+    document.getElementById('b-name').value = name || '';
+    document.getElementById('b-phone').value = phone || '';
+    document.getElementById('b-email').value = email || '';
+    document.getElementById('b-rego').value = rego || '';
+    
+    // Auto-set date to today
+    const dInput = document.getElementById('b-date');
+    if (!dInput.value) {
+        dInput.value = new Date().toISOString().split('T')[0];
+    }
+    updateAvailableTimes();
+}
+
+function generateInvoice() {
+    const id = document.getElementById('m-job-id').value;
+    const j = db.jobs.find(x => x.jobNo === id);
+    if (!j) return;
+    const v = db.vehicles[j.rego] || {};
+
+    document.getElementById('inv-job-display').innerText = `Job ${j.jobNo} — ${j.rego}`;
+    document.getElementById('inv-date').innerText = j.date;
+    document.getElementById('inv-no').innerText = j.jobNo;
+    document.getElementById('inv-cust-name').innerText = j.name || '—';
+    document.getElementById('inv-cust-phone').innerText = j.phone || '—';
+    document.getElementById('inv-cust-email').innerText = j.email || '—';
+    
+    document.getElementById('inv-rego').innerText = j.rego;
+    document.getElementById('inv-make-model').innerText = `${v.make || ''} ${v.model || ''}${v.capacity ? ' — Engine: ' + v.capacity : ''}`;
+    
+    // Next Service Due (replaces odometer)
+    const nsEl = document.getElementById('inv-next-service');
+    if (j.km) {
+        const interval = parseFloat(j.kmInterval || 10000);
+        const nextKm = parseFloat(j.km) + interval;
+        nsEl.innerText = '✓ Next Service Due at: ' + nextKm.toLocaleString() + ' Km';
+    } else {
+        nsEl.innerText = '';
+    }
+
+    const tbody = document.getElementById('inv-tbody');
+    tbody.innerHTML = '';
+    let partsTotal = 0;
+    (j.parts || []).forEach(p => {
+        const lineTotal = p.qty * p.sellPrice;
+        partsTotal += lineTotal;
+        tbody.innerHTML += `
+            <tr class="hover:bg-slate-50">
+                <td class="p-3 py-4">${p.desc}</td>
+                <td class="p-3 py-4 text-center">${p.qty}</td>
+                <td class="p-3 py-4 text-right">$${p.sellPrice.toFixed(2)}</td>
+                <td class="p-3 py-4 text-right">$${lineTotal.toFixed(2)}</td>
+            </tr>`;
+    });
+    if (!j.parts || !j.parts.length) {
+        tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-slate-400 italic">No parts applied</td></tr>`;
+    }
+
+    const labour = parseFloat(j.labour || 0);
+    document.getElementById('inv-parts-total').innerText = '$' + partsTotal.toFixed(2);
+    document.getElementById('inv-labour-total').innerText = '$' + labour.toFixed(2);
+    document.getElementById('inv-grand-total').innerText = '$' + (partsTotal + labour).toFixed(2);
+
+    // Technical Report / Work Notes
+    const notesSection = document.getElementById('inv-notes-section');
+    const repEl = document.getElementById('inv-report');
+    if (j.report && j.report.trim()) {
+        repEl.innerText = j.report;
+        notesSection.style.display = 'block';
+    } else {
+        notesSection.style.display = 'none';
+    }
+
+    // Photo Evidence
+    const photosSection = document.getElementById('inv-photos-section');
+    const photosGrid = document.getElementById('inv-photos-grid');
+    const photos = j.photos || [];
+    if (photos.length) {
+        photosGrid.innerHTML = photos.map(src => `<img src="${src}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;border:1px solid #e2e8f0;">`).join('');
+        photosSection.style.display = 'block';
+    } else {
+        photosSection.style.display = 'none';
+    }
+
+    const emailBtn = document.getElementById('inv-email-btn');
+    if (j.email) {
+        emailBtn.classList.remove('hidden');
+        emailBtn.href = `mailto:${j.email}?subject=Tax Invoice - Job ${j.jobNo}&body=Hi ${j.name || ''},%0D%0A%0D%0APlease find your invoice for Job ${j.jobNo} attached to this email.%0D%0A%0D%0AThank you for choosing Saturday Hobby Auto!`;
+    } else {
+        emailBtn.classList.add('hidden');
+    }
+
+    document.getElementById('invoiceModal').classList.add('active');
+}
+
+// ─── BOOKING EDIT / RESCHEDULE ───────────────────────────────────────────────
+function openEditBooking(jobNo) {
+    const j = db.jobs.find(x => x.jobNo === jobNo);
+    if (!j) return;
+    document.getElementById('eb-jobno').value    = jobNo;
+    document.getElementById('eb-date').value     = j.date || '';
+    document.getElementById('eb-time').value     = j.time || '';
+    document.getElementById('eb-name').value     = j.name || '';
+    document.getElementById('eb-phone').value    = j.phone || '';
+    document.getElementById('eb-email').value    = j.email || '';
+    document.getElementById('eb-rego').value     = j.rego || '';
+    document.getElementById('eb-report').value   = j.report || '';
+    document.getElementById('eb-title').innerText = `Edit Booking — ${jobNo}`;
+    document.getElementById('eb-reschedule-only').style.display = 'none';
+    document.getElementById('eb-full-form').style.display = 'block';
+    document.getElementById('editBookingModal').classList.add('active');
+}
+
+function openRescheduleDate(jobNo) {
+    const j = db.jobs.find(x => x.jobNo === jobNo);
+    if (!j) return;
+    document.getElementById('eb-jobno').value     = jobNo;
+    document.getElementById('eb-date-rs').value   = j.date || '';
+    document.getElementById('eb-time-rs').value   = j.time || '';
+    document.getElementById('eb-title').innerText  = `Reschedule — ${jobNo} (${j.name})`;
+    document.getElementById('eb-reschedule-only').style.display = 'block';
+    document.getElementById('eb-full-form').style.display = 'none';
+    document.getElementById('editBookingModal').classList.add('active');
+}
+
+function saveBookingEdit(e) {
+    e.preventDefault();
+    const jobNo = document.getElementById('eb-jobno').value;
+    const j = db.jobs.find(x => x.jobNo === jobNo);
+    if (!j) return;
+    j.date   = document.getElementById('eb-date').value;
+    j.time   = document.getElementById('eb-time').value;
+    j.name   = document.getElementById('eb-name').value;
+    j.phone  = document.getElementById('eb-phone').value;
+    j.email  = document.getElementById('eb-email').value;
+    j.rego   = document.getElementById('eb-rego').value;
+    j.report = document.getElementById('eb-report').value;
+    sync();
+    document.getElementById('editBookingModal').classList.remove('active');
+    renderData();
+}
+
+function saveRescheduleOnly() {
+    const jobNo = document.getElementById('eb-jobno').value;
+    const j = db.jobs.find(x => x.jobNo === jobNo);
+    if (!j) return;
+    const newDate = document.getElementById('eb-date-rs').value;
+    const newTime = document.getElementById('eb-time-rs').value;
+    if (!newDate) { alert('Please select a new date.'); return; }
+    j.date = newDate;
+    if (newTime) j.time = newTime;
+    sync();
+    document.getElementById('editBookingModal').classList.remove('active');
+    renderData();
+}
+
+// ─── INIT ────────────────────────────────────────────────────────────────────
+function toggleSidebar() {
+    const sb = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    if (sb.classList.contains('-translate-x-full')) {
+        sb.classList.remove('-translate-x-full');
+        overlay.classList.remove('hidden');
+    } else {
+        sb.classList.add('-translate-x-full');
+        overlay.classList.add('hidden');
+    }
+}
+
+window.onload  = () => { lockSystem(); showView('dashboard'); };
+window.onclick = (e) => { if(e.target.classList.contains('modal')) closeModal(); };
+</script>
+
+<!-- ── EDIT / RESCHEDULE BOOKING MODAL ─────────────────────────────── -->
+<div id="editBookingModal" class="modal" style="z-index:99000;">
+    <div class="bg-slate-900 w-full max-w-xl rounded-[40px] border border-slate-800 shadow-2xl p-5 md:p-10 relative">
+        <button onclick="document.getElementById('editBookingModal').classList.remove('active')" class="absolute top-8 right-8 text-3xl text-slate-500 hover:text-white">&times;</button>
+        <input type="hidden" id="eb-jobno">
+        <h3 id="eb-title" class="text-2xl font-black uppercase italic text-white mb-8">Edit Booking</h3>
+
+        <!-- Reschedule Only (date + time) -->
+        <div id="eb-reschedule-only" class="space-y-6">
+            <div class="p-5 bg-blue-900/20 border border-blue-700/40 rounded-3xl">
+                <p class="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-4"><i class="fas fa-calendar-alt mr-1"></i> Reschedule Date &amp; Time</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="text-[9px] font-black text-slate-500 uppercase">New Date</label>
+                        <input type="date" id="eb-date-rs" class="w-full mt-1 bg-slate-950 p-3 rounded-xl border border-slate-800 text-white font-bold outline-none text-sm">
+                    </div>
+                    <div>
+                        <label class="text-[9px] font-black text-slate-500 uppercase">New Time</label>
+                        <input type="time" id="eb-time-rs" class="w-full mt-1 bg-slate-950 p-3 rounded-xl border border-slate-800 text-white font-bold outline-none text-sm">
+                    </div>
+                </div>
+            </div>
+            <button onclick="saveRescheduleOnly()" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all shadow-xl"><i class="fas fa-calendar-check mr-2"></i>Confirm Reschedule</button>
+        </div>
+
+        <!-- Full Edit Form -->
+        <form id="eb-full-form" onsubmit="saveBookingEdit(event)" class="space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="text-[9px] font-black text-slate-500 uppercase">Date</label>
+                    <input type="date" id="eb-date" class="w-full mt-1 bg-slate-950 p-3 rounded-xl border border-slate-800 text-white font-bold outline-none text-sm">
+                </div>
+                <div>
+                    <label class="text-[9px] font-black text-slate-500 uppercase">Time</label>
+                    <input type="time" id="eb-time" class="w-full mt-1 bg-slate-950 p-3 rounded-xl border border-slate-800 text-white font-bold outline-none text-sm">
+                </div>
+            </div>
+            <div>
+                <label class="text-[9px] font-black text-slate-500 uppercase">Customer Name</label>
+                <input type="text" id="eb-name" class="w-full mt-1 bg-slate-950 p-3 rounded-xl border border-slate-800 text-white font-bold outline-none text-sm">
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="text-[9px] font-black text-slate-500 uppercase">Phone</label>
+                    <input type="tel" id="eb-phone" class="w-full mt-1 bg-slate-950 p-3 rounded-xl border border-slate-800 text-white outline-none text-sm">
+                </div>
+                <div>
+                    <label class="text-[9px] font-black text-slate-500 uppercase">Email</label>
+                    <input type="email" id="eb-email" class="w-full mt-1 bg-slate-950 p-3 rounded-xl border border-slate-800 text-white outline-none text-sm">
+                </div>
+            </div>
+            <div>
+                <label class="text-[9px] font-black text-slate-500 uppercase">Plate / Rego</label>
+                <input type="text" id="eb-rego" class="w-full mt-1 bg-slate-950 p-4 rounded-2xl border-2 border-dashed border-slate-700 text-center text-2xl font-black text-orange-500 uppercase outline-none">
+            </div>
+            <div>
+                <label class="text-[9px] font-black text-slate-500 uppercase">Service Notes</label>
+                <textarea id="eb-report" rows="3" class="w-full mt-1 bg-slate-950 p-3 rounded-xl border border-slate-800 text-white outline-none text-sm italic"></textarea>
+            </div>
+            <button type="submit" class="w-full bg-orange-600 hover:bg-orange-700 text-white py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all shadow-xl"><i class="fas fa-save mr-2"></i>Save Changes</button>
+        </form>
+    </div>
+</div>
+</body>
+</html>
